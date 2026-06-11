@@ -391,7 +391,7 @@ def main():
 	st.title("University Student Clusters Dashboard")
 	st.caption("Interactively explore clustering results from the student dataset")
 
-	default_csv = os.path.join(os.getcwd(), ".\Data\EncodedWomen_english.csv")
+	default_csv = os.path.join(os.getcwd(), "Data", "EncodedWomen_english.csv")
 	df = load_dataset(default_csv)
 
 	controls = sidebar_controls(df)
