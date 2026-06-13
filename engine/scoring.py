@@ -7,42 +7,52 @@ class CompatibilityEngine:
         self.weights = weights
 
     def compute_matrix(self, df_students: pd.DataFrame) -> np.ndarray:
+        """Vectorized compatibility matrix computation for O(n²) performance with n² factor reduced."""
         n = len(df_students)
         matrix = np.zeros((n, n))
-        records = df_students.to_dict(orient='records')
         
+        # Extract arrays once for vectorized operations
+        cleanliness = df_students['cleanliness'].values
+        noise_tol = df_students['noise_tolerance'].values
+        study = df_students['study_habit'].values
+        sleep = df_students['sleep_window'].values
+        wake = df_students['wake_window'].values
+        faculty = df_students['faculty'].values
+        
+        w_clean = self.weights.get('cleanliness', 40)
+        w_noise = self.weights.get('noise', 30)
+        w_study = self.weights.get('study', 30)
+        w_schedule = self.weights.get('schedule', 20)
+        
+        # Vectorized pairwise comparisons using broadcasting
         for i in range(n):
-            for j in range(i + 1, n):
-                score = 0
-                s1, s2 = records[i], records[j]
-                
-                # 1. Cleanliness Matching (Binary 1 or 0 matching is crucial)
-                if s1['cleanliness'] == s2['cleanliness']:
-                    score += self.weights.get('cleanliness', 40)
-                else:
-                    score -= self.weights.get('cleanliness', 40) * 0.5
-                
-                # 2. Noise & Study Environment Alignment
-                if s1['noise_tolerance'] == s2['noise_tolerance']:
-                    score += self.weights.get('noise', 30)
-                if s1['study_habit'] == s2['study_habit']:
-                    score += self.weights.get('study', 30)
-                
-                # 3. Sleep & Wake Schedules
-                if s1['sleep_window'] == s2['sleep_window']:
-                    score += self.weights.get('schedule', 20)
-                if s1['wake_window'] == s2['wake_window']:
-                    score += self.weights.get('schedule', 20)
-                    
-                # 4. Optional Peer Multiplier: Common Faculty/Major (soft bonus)
-                if s1['faculty'] == s2['faculty']:
-                    score += 10
-                
-                # 5. Cultural/Sect Safety Constraint (Hard Boundary Filter)
-                # if s1['cultural_group'] != s2['cultural_group']:
-                    # score -= 1000  # Strong negative force to isolate distinct classes
-                
-                matrix[i][j] = score
-                matrix[j][i] = score
-                
+            # Compare student i with all students j > i
+            j_range = np.arange(i + 1, n)
+            
+            # Cleanliness match
+            match_clean = (cleanliness[i] == cleanliness[j_range])
+            score_clean = np.where(match_clean, w_clean, -w_clean * 0.5)
+            
+            # Noise tolerance match
+            score_noise = np.where(noise_tol[i] == noise_tol[j_range], w_noise, 0)
+            
+            # Study habit match
+            score_study = np.where(study[i] == study[j_range], w_study, 0)
+            
+            # Sleep window match
+            score_sleep = np.where(sleep[i] == sleep[j_range], w_schedule, 0)
+            
+            # Wake window match
+            score_wake = np.where(wake[i] == wake[j_range], w_schedule, 0)
+            
+            # Faculty bonus (soft)
+            score_faculty = np.where(faculty[i] == faculty[j_range], 10, 0)
+            
+            # Combine all scores
+            scores = score_clean + score_noise + score_study + score_sleep + score_wake + score_faculty
+            
+            # Fill matrix symmetrically
+            matrix[i, j_range] = scores
+            matrix[j_range, i] = scores
+        
         return matrix

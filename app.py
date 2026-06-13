@@ -121,7 +121,7 @@ def main():
     ])
 
     # Run Optimization Core trigger block
-    st.subheader("🚀 Operational Controls Execution")
+    st.subheader("Operational Controls Execution")
     if st.button("Execute Mathematical Optimization Plan", type="primary", use_container_width=True):
         
         # Step A: Graph edge scores compilation
@@ -130,13 +130,43 @@ def main():
             matrix = scorer.compute_matrix(processed_df)
             st.toast("Compatibility graph fully generated.", icon="📊")
 
-        # Step B: Trigger CP-SAT Solver Instance
+        # Step B: Trigger CP-SAT Solver Instance with Progress Tracking
+        progress_placeholder = st.empty()
+        
+        # Progress tracking state
+        progress_state = {
+            "best_objective": 0,
+            "best_bound": 0,
+            "solution_count": 0
+        }
+        
+        def update_progress(current_objective, best_bound, solution_count, gap_percent):
+            """Callback function to update UI during optimization."""
+            progress_state["best_objective"] = current_objective
+            progress_state["best_bound"] = best_bound
+            progress_state["solution_count"] = solution_count
+            
+            # Update progress display
+            with progress_placeholder.container():
+                st.info(f"🔄 Optimization in progress... Found {solution_count} solution(s)")
+                col_prog1, col_prog2, col_prog3 = st.columns(3)
+                with col_prog1:
+                    st.metric("Current Best Compatibility Score", f"{int(current_objective):,}")
+                with col_prog2:
+                    st.metric("Theoretical Upper Bound", f"{int(best_bound):,}")
+                with col_prog3:
+                    st.metric("Optimality Gap", f"{gap_percent:.1f}%")
+        
         with st.spinner(f"Running Google OR-Tools branch-and-bound optimization (Timeout: {controls['timeout']}s)..."):
             engine = DormOptimizationEngine(processed_df, rooms_df, matrix)
             engine.build_model()
+            engine.set_progress_callback(update_progress)  # Set progress callback
             results_df, status = engine.solve(time_limit_sec=controls["timeout"])
 
         if results_df is not None:
+            # Clear progress placeholder
+            progress_placeholder.empty()
+            
             st.balloons()
             st.success(f"Optimal Allocation Plan Discovered Successfully. Mathematical Bound State: **{status}**")
             
@@ -186,6 +216,7 @@ def main():
                 use_container_width=True
             )
         else:
+            progress_placeholder.empty()
             st.error("Solver Error: A valid arrangement is mathematically impossible under these parameter boundaries.")
             st.info("Try increasing Room Capacity or adjusting structural settings to expand search windows.")
             
