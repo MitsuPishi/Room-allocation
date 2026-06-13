@@ -1,4 +1,4 @@
-# University Student Clusters Dashboard
+# An AI-based Roommate Matching System for University Dormitories
 
 A comprehensive Streamlit application for university administrators to analyze student clustering results, allocate dormitory rooms, and explore student data through interactive visualizations.
 
@@ -55,7 +55,7 @@ Here is an example of the app in action:
 
 ### Windows PowerShell
 ```powershell
-git clone https://github.com/DarkCube-team/Dorm
+git clone https://github.com/DarkCube-team/UniMate
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
