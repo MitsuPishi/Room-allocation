@@ -32,9 +32,9 @@ def preprocess_student_data(df: pd.DataFrame) -> pd.DataFrame:
     df_clean['cleanliness'] = df_clean['cleanliness'].apply(
         lambda x: 1 if 'نظم طلبان' in str(x) else 0
     )
-    df['cultural_group'] = df['cultural_group'].apply(
-        lambda x: 
-    )
+    # df['cultural_group'] = df['cultural_group'].apply(
+    #     lambda x: 
+    # )
 
     df_clean['age'] = pd.to_numeric(df_clean['age'], errors='coerce').fillna(20).astype(int)
 

@@ -39,8 +39,8 @@ class CompatibilityEngine:
                     score += 10
                 
                 # 5. Cultural/Sect Safety Constraint (Hard Boundary Filter)
-                if s1['cultural_group'] != s2['cultural_group']:
-                    score -= 1000  # Strong negative force to isolate distinct classes
+                # if s1['cultural_group'] != s2['cultural_group']:
+                    # score -= 1000  # Strong negative force to isolate distinct classes
                 
                 matrix[i][j] = score
                 matrix[j][i] = score
