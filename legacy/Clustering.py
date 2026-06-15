@@ -1,3 +1,5 @@
+"""Deprecated clustering experiment. Production code must not import this."""
+
 import os
 os.environ['OMP_NUM_THREADS'] = '4'
 
