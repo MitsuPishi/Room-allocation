@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import sys
 import time
 
 import numpy as np
@@ -55,6 +56,16 @@ def solve_exact_total_score(
         raise ValueError("The exact oracle is limited to 60 students.")
     if capacity < 2:
         raise ValueError("capacity must be at least 2")
+    if sys.platform == "win32":
+        raise RuntimeError(
+            "The exact OR-Tools oracle is unavailable on this Windows setup; "
+            "the installed solver can terminate the Python process."
+        )
+    if sys.version_info >= (3, 14):
+        raise RuntimeError(
+            "The exact OR-Tools oracle is unavailable on Python 3.14; "
+            "use Python 3.12 for exact benchmark validation."
+        )
 
     n_students = len(matrix)
     sizes = _target_sizes(n_students, capacity)

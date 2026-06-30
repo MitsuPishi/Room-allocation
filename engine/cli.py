@@ -9,7 +9,7 @@ import sys
 
 import pandas as pd
 
-from .optimizer import OptimizationConfig, RoomOptimizer
+from .optimizer import OptimizationConfig, RoomOptimizer, parse_capacity_mix
 from .preprocessing import parse_student_survey
 from .scoring import CompatibilityScorer, ScoringConfig
 
@@ -53,9 +53,11 @@ def assign_command(args: argparse.Namespace) -> int:
     optimizer = RoomOptimizer(
         OptimizationConfig(
             capacity=args.capacity,
+            capacity_mix=parse_capacity_mix(args.capacity_mix),
             time_limit_seconds=args.time_limit,
             seed=args.seed,
             restarts=args.restarts,
+            allow_unsafe_cp_sat=args.allow_unsafe_cp_sat,
         )
     )
 
@@ -127,9 +129,24 @@ def build_parser() -> argparse.ArgumentParser:
     assign.add_argument("--input", required=True, help="Raw questionnaire CSV/XLSX.")
     assign.add_argument("--output-dir", default="results", help="Report directory.")
     assign.add_argument("--capacity", type=int, default=6)
+    assign.add_argument(
+        "--capacity-mix",
+        help=(
+            "Variable room inventory as count-by-capacity entries, "
+            "for example 100x6,20x4. Overrides --capacity when provided."
+        ),
+    )
     assign.add_argument("--time-limit", type=float, default=300.0)
     assign.add_argument("--seed", type=int, default=42)
     assign.add_argument("--restarts", type=int, default=3)
+    assign.add_argument(
+        "--allow-unsafe-cp-sat",
+        action="store_true",
+        help=(
+            "Attempt CP-SAT refinement even on runtimes where OR-Tools may "
+            "terminate the Python process."
+        ),
+    )
     assign.add_argument("--quiet", action="store_true")
     assign.set_defaults(handler=assign_command)
     return parser

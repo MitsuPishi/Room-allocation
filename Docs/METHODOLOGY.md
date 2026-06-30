@@ -2,11 +2,13 @@
 
 ## 1. Decision problem
 
-The production problem is a fixed-capacity coalition-formation problem:
-partition every eligible student into balanced rooms while maximizing roommate
-compatibility. For rooms larger than two, exact global optimization becomes
-computationally hard at realistic university scale. UniMate therefore uses an
-auditable hybrid search and reports large solutions as `best_found`.
+The production problem is a capacity-constrained coalition-formation problem:
+partition every eligible student into available rooms while maximizing roommate
+compatibility. Room inventories may be uniform or mixed, for example 100 rooms
+with six beds and 20 rooms with four beds. For rooms larger than two, exact
+global optimization becomes computationally hard at realistic university scale.
+UniMate therefore uses an auditable hybrid search and reports large solutions as
+`best_found`.
 
 Relevant background:
 
@@ -82,7 +84,8 @@ This prevents a high average from concealing a small number of very poor rooms.
 
 ## 5. Search algorithm
 
-1. Compute target room sizes so occupancy differs by at most one.
+1. Compute target room occupancies from the configured capacities, leaving rare
+   surplus beds vacant without exceeding any physical room capacity.
 2. Rank students by how easily they can be placed with highly compatible peers.
 3. Place the hardest students first and fill rooms using prospective minimum and
    mean pair compatibility.
@@ -128,6 +131,8 @@ Before claiming real-world effectiveness:
 ## 8. Benchmark protocol
 
 Report random and optimized baselines for 1,000 and 5,000 students at capacity
-six. Record hardware, Python version, seed, runtime, matrix memory, fairness
-metrics, and total pair score. On small instances, compare total pair score with
-the exact oracle and report both solver status and optimality gap.
+six, plus any production mixed-capacity inventory used in deployment. Record
+hardware, Python version, seed, runtime, matrix memory, fairness metrics, room
+inventory, vacancies, and total pair score. On small instances, compare total
+pair score with the exact oracle and report both solver status and optimality
+gap.

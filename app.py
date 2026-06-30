@@ -18,6 +18,7 @@ from engine import (
     OptimizationConfig,
     RoomOptimizer,
     ScoringConfig,
+    parse_capacity_mix,
     parse_student_survey,
 )
 
@@ -69,6 +70,27 @@ def optimization_controls() -> tuple[OptimizationConfig, ScoringConfig]:
         value=6,
         step=1,
     )
+    variable_capacity = st.sidebar.checkbox(
+        "Variable room capacities",
+        value=False,
+        help="Use a compact room inventory such as 100x6,20x4.",
+    )
+    capacity_mix = None
+    if variable_capacity:
+        capacity_mix_text = st.sidebar.text_input(
+            "Capacity mix",
+            value="",
+            placeholder="100x6,20x4",
+            help="Format is room-count x room-capacity, separated by commas.",
+        )
+        if not capacity_mix_text.strip():
+            st.sidebar.info("Enter a capacity mix to use variable room capacities.")
+            st.stop()
+        try:
+            capacity_mix = parse_capacity_mix(capacity_mix_text)
+        except ValueError as exc:
+            st.sidebar.error(str(exc))
+            st.stop()
     time_limit = st.sidebar.number_input(
         "Search time limit (seconds)",
         min_value=5,
@@ -105,31 +127,69 @@ def optimization_controls() -> tuple[OptimizationConfig, ScoringConfig]:
         scoring = ScoringConfig()
 
     st.sidebar.subheader("Advanced optimizer")
-    cp_sat_supported = sys.version_info < (3, 14)
+    cp_sat_risky_runtime = sys.version_info >= (3, 14) or sys.platform == "win32"
     cp_sat_enabled = st.sidebar.checkbox(
         "CP-SAT neighborhood refinement",
-        value=cp_sat_supported,
-        disabled=not cp_sat_supported,
+        value=not cp_sat_risky_runtime,
         help=(
-            "Optional late-stage OR-Tools refinement. It is disabled on Python "
-            "3.14 because the installed OR-Tools build can terminate the Python "
-            "process during this phase."
+            "Optional late-stage OR-Tools refinement. On this Windows/Python "
+            "setup it may terminate the Streamlit process, so it defaults off."
         ),
     )
-    if not cp_sat_supported:
+    if cp_sat_risky_runtime and cp_sat_enabled:
+        st.sidebar.error(
+            "CP-SAT is enabled on a runtime where OR-Tools has crashed before. "
+            "If Streamlit stops near the end of optimization, restart it and "
+            "turn this option off."
+        )
+    elif sys.version_info >= (3, 14):
         st.sidebar.warning(
-            "Python 3.14 detected: CP-SAT refinement is disabled to prevent the "
-            "dashboard from stopping during optimization. Python 3.12 is the "
-            "supported runtime for full optimization."
+            "Python 3.14 detected: CP-SAT refinement defaults off to prevent "
+            "the dashboard from stopping during optimization. Python 3.12 is "
+            "the supported runtime for normal use."
+        )
+    elif sys.platform == "win32":
+        st.sidebar.warning(
+            "Windows detected: CP-SAT refinement defaults off because the "
+            "installed OR-Tools solver can terminate Streamlit near the end of "
+            "optimization."
         )
 
     optimization = OptimizationConfig(
         capacity=int(capacity),
+        capacity_mix=capacity_mix,
         time_limit_seconds=float(time_limit),
         seed=int(seed),
         cp_sat_neighborhood_rooms=4 if cp_sat_enabled else 0,
+        allow_unsafe_cp_sat=bool(cp_sat_enabled and cp_sat_risky_runtime),
     )
     return optimization, scoring
+
+
+def render_room_inventory_summary(
+    config: OptimizationConfig,
+    student_count: int,
+) -> bool:
+    if config.capacity_mix is None:
+        total_rooms = int(np.ceil(student_count / config.capacity))
+        total_beds = total_rooms * config.capacity
+    else:
+        total_rooms = sum(count for count, _ in config.capacity_mix)
+        total_beds = sum(count * capacity for count, capacity in config.capacity_mix)
+    vacancies = total_beds - student_count
+
+    st.sidebar.subheader("Room inventory")
+    st.sidebar.caption(
+        f"{total_rooms:,} rooms | {total_beds:,} beds | "
+        f"{student_count:,} students | {max(0, vacancies):,} vacant beds"
+    )
+    if vacancies < 0:
+        st.sidebar.error(
+            "The configured room inventory does not provide enough beds for "
+            f"{student_count:,} students."
+        )
+        return False
+    return True
 
 
 def clean_label(value: Any) -> str:
@@ -775,6 +835,13 @@ def main() -> None:
     st.caption(f"Data source: {source_name}")
     parsed = parse_student_survey(raw)
     render_validation(parsed)
+    inventory_is_valid = render_room_inventory_summary(
+        optimization_config,
+        len(parsed.data),
+    )
+    if not inventory_is_valid:
+        st.error("Add enough room capacity before running an assignment.")
+        return
     if not parsed.is_valid:
         st.error("Correct the validation errors before running an assignment.")
         return
@@ -811,7 +878,7 @@ def main() -> None:
         progress = st.progress(0.0, text="Computing compatibility scores")
         scorer = CompatibilityScorer(scoring_config)
         scores = scorer.score(parsed.data)
-        progress.progress(0.1, text="Building initial balanced assignments")
+        progress.progress(0.1, text="Building initial room assignments")
         seen_events = 0
 
         def update_progress(event: dict) -> None:

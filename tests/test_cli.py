@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pandas as pd
+
 from engine.cli import main
 from tests.test_preprocessing import raw_survey
 
@@ -23,6 +25,8 @@ class CliTests(unittest.TestCase):
                     str(output_path),
                     "--capacity",
                     "2",
+                    "--capacity-mix",
+                    "2x4,2x3",
                     "--time-limit",
                     "2",
                     "--restarts",
@@ -40,6 +44,9 @@ class CliTests(unittest.TestCase):
                 "run_metadata.json",
             ):
                 self.assertTrue((output_path / name).exists(), name)
+            assignments = pd.read_csv(output_path / "assignments.csv")
+            self.assertIn("room_capacity", assignments.columns)
+            self.assertTrue((assignments["room_capacity"] <= 4).all())
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ under `legacy/`.
 ## What the system claims
 
 - Every accepted row is validated against an explicit questionnaire schema.
-- Room capacities are respected and occupancy differs by at most one student.
+- Room capacities are respected, including mixed room inventories.
 - Compatibility scores are reproducible and explainable by four dimensions.
 - The optimizer protects the weakest student and lower-quality rooms before
   improving the global mean.
@@ -53,9 +53,14 @@ Do not reuse the old checked-in Linux virtual environment on Windows.
 streamlit run app.py
 ```
 
-The default example is `Data/MOCK_DATA-Women.csv`. Capacity defaults to six and
-the production scoring weights are fixed equally across the four dimensions.
-Adjustable weights are clearly marked as sensitivity analysis.
+The default example is `Data/MOCK_DATA-Women.csv`. Uniform capacity defaults to
+six. Enable variable room capacities to enter compact inventories such as
+`100x6,20x4`. The production scoring weights are fixed equally across the four
+dimensions. Adjustable weights are clearly marked as sensitivity analysis.
+On this Windows setup, CP-SAT neighborhood refinement defaults off in the
+dashboard because the installed OR-Tools solver can terminate Streamlit near the
+end of an optimization run. You can still turn it on explicitly from Advanced
+optimizer when you want to experiment.
 
 ## Command line
 
@@ -64,6 +69,29 @@ python -m engine assign `
   --input Data/MOCK_DATA-Women.csv `
   --output-dir results/women-2026 `
   --capacity 6 `
+  --time-limit 300 `
+  --seed 42
+```
+
+On Windows, the CLI also keeps the CP-SAT safety guard unless you explicitly
+opt in:
+
+```powershell
+python -m engine assign `
+  --input Data/MOCK_DATA-Women.csv `
+  --output-dir results/women-2026-cpsat `
+  --capacity 6 `
+  --allow-unsafe-cp-sat
+```
+
+For mixed room inventories, use count-by-capacity entries. For example, this
+means 100 rooms with six beds and 20 rooms with four beds:
+
+```powershell
+python -m engine assign `
+  --input Data/MOCK_DATA-Women.csv `
+  --output-dir results/women-2026 `
+  --capacity-mix "100x6,20x4" `
   --time-limit 300 `
   --seed 42
 ```
@@ -104,6 +132,18 @@ parsed = parse_student_survey(raw_dataframe, strict=True)
 scores = CompatibilityScorer().score(parsed.data)
 result = RoomOptimizer(
     OptimizationConfig(capacity=6, time_limit_seconds=300, seed=42)
+).optimize(parsed.data, scores)
+```
+
+Mixed capacity example:
+
+```python
+result = RoomOptimizer(
+    OptimizationConfig(
+        capacity_mix=((100, 6), (20, 4)),
+        time_limit_seconds=300,
+        seed=42,
+    )
 ).optimize(parsed.data, scores)
 ```
 

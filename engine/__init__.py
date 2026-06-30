@@ -8,6 +8,7 @@ from .optimizer import (
     evaluate_assignment_metrics,
     OptimizationConfig,
     OptimizationResult,
+    parse_capacity_mix,
     RoomOptimizer,
 )
 from .preprocessing import (
@@ -36,6 +37,7 @@ __all__ = [
     "ExactTotalScoreResult",
     "OptimizationConfig",
     "OptimizationResult",
+    "parse_capacity_mix",
     "RoomOptimizer",
     "SCHEMA_VERSION",
     "SCORING_VERSION",

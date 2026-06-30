@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 import math
+import re
+import sys
 import time
 from typing import Callable, Iterable
 
@@ -15,13 +17,15 @@ import pandas as pd
 from .scoring import CompatibilityScores, ScoringConfig
 
 
-ALGORITHM_VERSION = "fair-room-search-v1"
+ALGORITHM_VERSION = "fair-room-search-v2"
 ProgressCallback = Callable[[dict[str, float | int | str]], None]
+CapacityMix = tuple[tuple[int, int], ...]
 
 
 @dataclass(frozen=True)
 class OptimizationConfig:
     capacity: int = 6
+    capacity_mix: CapacityMix | str | None = None
     time_limit_seconds: float = 300.0
     seed: int = 42
     restarts: int = 3
@@ -31,9 +35,15 @@ class OptimizationConfig:
     stagnation_limit: int = 150
     cp_sat_neighborhood_rooms: int = 4
     cp_sat_time_limit_seconds: float = 8.0
+    allow_unsafe_cp_sat: bool = False
     algorithm_version: str = ALGORITHM_VERSION
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "capacity_mix",
+            _normalize_capacity_mix(self.capacity_mix),
+        )
         if self.capacity < 2:
             raise ValueError("Room capacity must be at least 2.")
         if self.time_limit_seconds <= 0:
@@ -77,6 +87,10 @@ class OptimizationResult:
     data_hash: str
     config_hash: str
     search_history: list[dict[str, float | int | str]]
+    room_capacities: list[int]
+    configured_room_count: int
+    configured_bed_count: int
+    vacancies: int
 
     def metadata(self) -> dict[str, object]:
         return {
@@ -89,6 +103,15 @@ class OptimizationResult:
             "config_hash": self.config_hash,
             "configuration": asdict(self.config),
             "scoring_configuration": asdict(self.scoring_config),
+            "room_inventory": {
+                "requested_capacity_mix": self.config.capacity_mix,
+                "generated_room_capacities": self.room_capacities,
+                "total_rooms": self.configured_room_count,
+                "assigned_rooms": len(self.room_capacities),
+                "total_beds": self.configured_bed_count,
+                "occupied_beds": int(len(self.assignments)),
+                "vacancies": self.vacancies,
+            },
             "metrics": asdict(self.metrics),
             "search_history": self.search_history,
         }
@@ -103,6 +126,82 @@ class _RoomEvaluation:
     @property
     def utility_sum(self) -> float:
         return float(self.student_utilities.sum())
+
+
+@dataclass(frozen=True)
+class _RoomProfile:
+    target_sizes: np.ndarray
+    capacities: np.ndarray
+    configured_room_count: int
+    configured_bed_count: int
+
+    @property
+    def vacancies(self) -> int:
+        return int(self.configured_bed_count - int(self.target_sizes.sum()))
+
+
+def parse_capacity_mix(value: str | None) -> CapacityMix | None:
+    """Parse compact capacity mixes such as ``100x6,20x4``."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+
+    totals: dict[int, int] = {}
+    for part in re.split(r"\s*,\s*", text):
+        match = re.fullmatch(r"(\d+)\s*[xX*]\s*(\d+)", part.strip())
+        if not match:
+            raise ValueError(
+                "Capacity mix must use count-by-capacity entries like 100x6,20x4."
+            )
+        count = int(match.group(1))
+        capacity = int(match.group(2))
+        if count <= 0:
+            raise ValueError("Room counts in capacity mix must be positive.")
+        if capacity < 2:
+            raise ValueError("Room capacities in capacity mix must be at least 2.")
+        totals[capacity] = totals.get(capacity, 0) + count
+
+    return tuple(
+        (count, capacity)
+        for capacity, count in sorted(totals.items(), reverse=True)
+    )
+
+
+def _normalize_capacity_mix(value: CapacityMix | str | None) -> CapacityMix | None:
+    if isinstance(value, str) or value is None:
+        return parse_capacity_mix(value)
+
+    totals: dict[int, int] = {}
+    try:
+        entries = list(value)
+    except TypeError as exc:
+        raise ValueError(
+            "capacity_mix must be entries of (room_count, room_capacity)."
+        ) from exc
+
+    if not entries:
+        return None
+    for entry in entries:
+        try:
+            count, capacity = entry
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "capacity_mix must be entries of (room_count, room_capacity)."
+            ) from exc
+        count = int(count)
+        capacity = int(capacity)
+        if count <= 0:
+            raise ValueError("Room counts in capacity_mix must be positive.")
+        if capacity < 2:
+            raise ValueError("Room capacities in capacity_mix must be at least 2.")
+        totals[capacity] = totals.get(capacity, 0) + count
+
+    return tuple(
+        (count, capacity)
+        for capacity, count in sorted(totals.items(), reverse=True)
+    )
 
 
 def _data_fingerprint(students: pd.DataFrame) -> str:
@@ -129,6 +228,67 @@ def _target_room_sizes(n_students: int, capacity: int) -> np.ndarray:
     targets = np.full(n_rooms, base, dtype=np.int16)
     targets[:larger_rooms] += 1
     return targets
+
+
+def _target_sizes_from_capacities(
+    n_students: int,
+    capacities: np.ndarray,
+) -> np.ndarray:
+    if capacities.sum() < n_students:
+        raise ValueError(
+            "Capacity mix does not provide enough beds for all students."
+        )
+
+    active_count = min(len(capacities), n_students)
+    active_capacities = capacities[:active_count]
+    max_capacity = int(active_capacities.max())
+    base = 1
+    for level in range(1, max_capacity + 1):
+        if int(np.minimum(active_capacities, level).sum()) <= n_students:
+            base = level
+        else:
+            break
+
+    targets = np.minimum(active_capacities, base).astype(np.int16)
+    remaining = n_students - int(targets.sum())
+    if remaining > 0:
+        eligible = np.flatnonzero(targets < active_capacities)
+        order = sorted(
+            eligible.tolist(),
+            key=lambda index: (-int(active_capacities[index]), int(index)),
+        )
+        for index in order[:remaining]:
+            targets[index] += 1
+    return targets
+
+
+def _room_profile(n_students: int, config: OptimizationConfig) -> _RoomProfile:
+    if config.capacity_mix is None:
+        targets = _target_room_sizes(n_students, config.capacity)
+        capacities = np.full(len(targets), config.capacity, dtype=np.int16)
+        return _RoomProfile(
+            target_sizes=targets,
+            capacities=capacities,
+            configured_room_count=len(capacities),
+            configured_bed_count=int(capacities.sum()),
+        )
+
+    capacities = np.asarray(
+        [
+            capacity
+            for count, capacity in config.capacity_mix
+            for _ in range(count)
+        ],
+        dtype=np.int16,
+    )
+    targets = _target_sizes_from_capacities(n_students, capacities)
+    active_capacities = capacities[: len(targets)]
+    return _RoomProfile(
+        target_sizes=targets,
+        capacities=active_capacities,
+        configured_room_count=len(capacities),
+        configured_bed_count=int(capacities.sum()),
+    )
 
 
 def _evaluate_room(members: Iterable[int], matrix: np.ndarray) -> _RoomEvaluation:
@@ -309,7 +469,8 @@ class RoomOptimizer:
         if len(students) < 2:
             raise ValueError("At least two students are required for room assignment.")
 
-        targets = _target_room_sizes(len(students), self.config.capacity)
+        profile = _room_profile(len(students), self.config)
+        targets = profile.target_sizes
         history: list[dict[str, float | int | str]] = []
         best_rooms: list[list[int]] | None = None
         best_evaluations: list[_RoomEvaluation] | None = None
@@ -380,6 +541,7 @@ class RoomOptimizer:
             score_result,
             best_rooms,
             best_evaluations,
+            profile.capacities,
         )
         return OptimizationResult(
             assignments=assignments,
@@ -398,6 +560,10 @@ class RoomOptimizer:
                 ).encode("ascii")
             ).hexdigest(),
             search_history=history,
+            room_capacities=[int(capacity) for capacity in profile.capacities],
+            configured_room_count=profile.configured_room_count,
+            configured_bed_count=profile.configured_bed_count,
+            vacancies=profile.vacancies,
         )
 
     def _swap_search(
@@ -528,6 +694,10 @@ class RoomOptimizer:
         remaining = deadline - time.monotonic()
         if remaining < 1.0 or self.config.cp_sat_neighborhood_rooms < 2:
             return rooms, evaluations, metrics, None
+        if sys.platform == "win32" and not self.config.allow_unsafe_cp_sat:
+            return rooms, evaluations, metrics, "unavailable_windows"
+        if sys.version_info >= (3, 14) and not self.config.allow_unsafe_cp_sat:
+            return rooms, evaluations, metrics, "unavailable_python_3_14"
 
         try:
             from ortools.sat.python import cp_model
@@ -642,12 +812,13 @@ class RoomOptimizer:
         score_result: CompatibilityScores,
         rooms: list[list[int]],
         evaluations: list[_RoomEvaluation],
+        capacities: np.ndarray,
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         assignment_records = []
         room_records = []
         student_records = []
-        for room_index, (room, evaluation) in enumerate(
-            zip(rooms, evaluations, strict=True),
+        for room_index, (room, evaluation, capacity) in enumerate(
+            zip(rooms, evaluations, capacities, strict=True),
             start=1,
         ):
             room_id = f"Room-{room_index:04d}"
@@ -656,6 +827,7 @@ class RoomOptimizer:
                 {
                     "room_id": room_id,
                     "room_size": len(room),
+                    "room_capacity": int(capacity),
                     "room_quality": evaluation.quality,
                     "mean_student_utility": evaluation.mean_utility,
                     **{
@@ -673,6 +845,7 @@ class RoomOptimizer:
                 base = {
                     "room_id": room_id,
                     "bed": position,
+                    "room_capacity": int(capacity),
                     "student_idx": int(student_index),
                     "student_id": student["student_id"],
                     "student_name": student.get("student_name", student["student_id"]),
@@ -717,12 +890,18 @@ class DormOptimizationEngine:
         self.progress_callback = callback
 
     def solve(self, time_limit_sec: int = 30):
-        capacities = self.rooms["capacity"].dropna().astype(int).unique()
-        if len(capacities) != 1:
-            raise ValueError("The compatibility adapter requires uniform capacities.")
+        capacities = self.rooms["capacity"].dropna().astype(int)
+        if capacities.empty:
+            raise ValueError("Room table must include at least one capacity value.")
+        capacity_counts = capacities.value_counts().sort_index(ascending=False)
+        capacity_mix = tuple(
+            (int(count), int(capacity))
+            for capacity, count in capacity_counts.items()
+        )
         optimizer = RoomOptimizer(
             OptimizationConfig(
-                capacity=int(capacities[0]),
+                capacity=int(capacities.max()),
+                capacity_mix=capacity_mix,
                 time_limit_seconds=float(time_limit_sec),
             )
         )
@@ -747,11 +926,34 @@ class DormOptimizationEngine:
         )
         output = self.result.assignments.rename(columns={"room_id": "generated_room_id"})
         room_names = self.rooms.reset_index(drop=True).copy()
-        room_names["generated_room_id"] = [
-            f"Room-{index:04d}" for index in range(1, len(room_names) + 1)
-        ]
+        if "room_id" not in room_names.columns:
+            room_names["room_id"] = [
+                f"Physical-{index:04d}" for index in range(1, len(room_names) + 1)
+            ]
+        if "room_name" not in room_names.columns:
+            room_names["room_name"] = room_names["room_id"]
+
+        available_by_capacity: dict[int, list[dict[str, object]]] = {}
+        for row in room_names.to_dict("records"):
+            capacity = int(row["capacity"])
+            available_by_capacity.setdefault(capacity, []).append(row)
+
+        mappings = []
+        for room in self.result.room_metrics.sort_values("room_id").to_dict("records"):
+            generated_room_id = str(room["room_id"])
+            capacity = int(room["room_capacity"])
+            available = available_by_capacity.get(capacity, [])
+            physical = available.pop(0) if available else {}
+            mappings.append(
+                {
+                    "generated_room_id": generated_room_id,
+                    "room_id": physical.get("room_id", generated_room_id),
+                    "room_name": physical.get("room_name", generated_room_id),
+                }
+            )
+
         output = output.merge(
-            room_names[["generated_room_id", "room_id", "room_name"]],
+            pd.DataFrame(mappings),
             on="generated_room_id",
             how="left",
         )
