@@ -1,3 +1,5 @@
 -r requirements.txt
 pytest>=8.3,<10
 psutil>=5.9,<8
+httpx>=0.28,<1
+pip-audit>=2.9,<3
