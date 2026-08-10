@@ -5,7 +5,13 @@ import numpy as np
 import pandas as pd
 
 from engine.exact import solve_exact_total_score, total_pair_score
-from engine.optimizer import OptimizationConfig, RoomOptimizer, parse_capacity_mix
+from engine.optimizer import (
+    DormOptimizationEngine,
+    OptimizationConfig,
+    RoomOptimizer,
+    parse_capacity_mix,
+    select_active_room_capacities,
+)
 from engine.scoring import CompatibilityScorer
 
 
@@ -128,6 +134,65 @@ class RoomOptimizerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "enough beds"):
             RoomOptimizer(config).optimize(students, scores)
+
+    def test_mixed_capacity_selects_smallest_sufficient_room_subset(self):
+        students = normalized_students(10)
+        scores = CompatibilityScorer().score(students)
+        config = OptimizationConfig(
+            capacity_mix=((10, 6),),
+            time_limit_seconds=2,
+            restarts=1,
+            max_swap_iterations=20,
+            cp_sat_neighborhood_rooms=0,
+        )
+
+        result = RoomOptimizer(config).optimize(students, scores)
+
+        self.assertEqual(result.room_capacities, [6, 6])
+        self.assertEqual(result.active_vacancies, 2)
+        self.assertEqual(result.unused_room_count, 8)
+        self.assertEqual(result.unused_bed_count, 48)
+        self.assertEqual(result.vacancies, 50)
+
+    def test_room_subset_tie_break_prefers_fewer_then_larger_rooms(self):
+        self.assertEqual(
+            select_active_room_capacities(8, ((1, 6), (2, 4), (1, 2))),
+            (6, 2),
+        )
+        self.assertEqual(
+            select_active_room_capacities(6, ((1, 6), (3, 2))),
+            (6,),
+        )
+
+    def test_room_subset_handles_large_maximum_inventory(self):
+        selected = select_active_room_capacities(5_000, ((100_000, 6),))
+        self.assertEqual(len(selected), 834)
+        self.assertEqual(sum(selected), 5_004)
+
+    def test_capacity_mix_fully_overrides_uniform_capacity(self):
+        config = OptimizationConfig(capacity=1, capacity_mix="1x4")
+        self.assertEqual(config.capacity_mix, ((1, 4),))
+
+    def test_legacy_engine_preserves_selected_physical_room_id(self):
+        students = normalized_students(3)
+        scores = CompatibilityScorer().score(students)
+        physical_rooms = pd.DataFrame(
+            [
+                {"room_id": "B-401", "room_name": "اتاق ۴۰۱", "capacity": 4},
+                {"room_id": "B-201", "room_name": "اتاق ۲۰۱", "capacity": 2},
+                {"room_id": "B-202", "room_name": "اتاق ۲۰۲", "capacity": 2},
+            ]
+        )
+
+        assignments, status = DormOptimizationEngine(
+            students,
+            physical_rooms,
+            scores.matrix,
+        ).solve(time_limit_sec=1)
+
+        self.assertEqual(status, "BestFound")
+        self.assertEqual(set(assignments["room_id"]), {"B-401"})
+        self.assertEqual(set(assignments["room_name"]), {"اتاق ۴۰۱"})
 
     def test_capacity_mix_parser_rejects_malformed_text(self):
         with self.assertRaisesRegex(ValueError, "count-by-capacity"):

@@ -48,6 +48,23 @@ class CompatibilityScoringTests(unittest.TestCase):
         self.assertAlmostEqual(sum(config.weights.values()), 100.0)
         self.assertIn("sensitivity", config.version)
 
+    def test_pair_explanation_does_not_require_full_matrix(self):
+        scorer = CompatibilityScorer()
+
+        explanation = scorer.explain_pair(
+            self.students.iloc[0],
+            self.students.iloc[1],
+        )
+
+        self.assertEqual(
+            set(explanation),
+            {"cleanliness", "noise", "study", "schedule", "total"},
+        )
+        self.assertAlmostEqual(
+            explanation["total"],
+            sum(value for key, value in explanation.items() if key != "total"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

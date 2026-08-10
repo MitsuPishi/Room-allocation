@@ -10,6 +10,7 @@ from .optimizer import (
     OptimizationResult,
     parse_capacity_mix,
     RoomOptimizer,
+    select_active_room_capacities,
 )
 from .preprocessing import (
     SCHEMA_VERSION,
@@ -39,6 +40,7 @@ __all__ = [
     "OptimizationResult",
     "parse_capacity_mix",
     "RoomOptimizer",
+    "select_active_room_capacities",
     "SCHEMA_VERSION",
     "SCORING_VERSION",
     "ScoringConfig",

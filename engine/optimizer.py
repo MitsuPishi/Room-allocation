@@ -44,7 +44,7 @@ class OptimizationConfig:
             "capacity_mix",
             _normalize_capacity_mix(self.capacity_mix),
         )
-        if self.capacity < 2:
+        if self.capacity_mix is None and self.capacity < 2:
             raise ValueError("Room capacity must be at least 2.")
         if self.time_limit_seconds <= 0:
             raise ValueError("Time limit must be positive.")
@@ -90,6 +90,10 @@ class OptimizationResult:
     room_capacities: list[int]
     configured_room_count: int
     configured_bed_count: int
+    active_bed_count: int
+    unused_room_count: int
+    unused_bed_count: int
+    active_vacancies: int
     vacancies: int
 
     def metadata(self) -> dict[str, object]:
@@ -109,7 +113,11 @@ class OptimizationResult:
                 "total_rooms": self.configured_room_count,
                 "assigned_rooms": len(self.room_capacities),
                 "total_beds": self.configured_bed_count,
+                "active_beds": self.active_bed_count,
+                "unused_rooms": self.unused_room_count,
+                "unused_beds": self.unused_bed_count,
                 "occupied_beds": int(len(self.assignments)),
+                "active_vacancies": self.active_vacancies,
                 "vacancies": self.vacancies,
             },
             "metrics": asdict(self.metrics),
@@ -134,6 +142,22 @@ class _RoomProfile:
     capacities: np.ndarray
     configured_room_count: int
     configured_bed_count: int
+
+    @property
+    def active_bed_count(self) -> int:
+        return int(self.capacities.sum())
+
+    @property
+    def unused_room_count(self) -> int:
+        return int(self.configured_room_count - len(self.capacities))
+
+    @property
+    def unused_bed_count(self) -> int:
+        return int(self.configured_bed_count - self.active_bed_count)
+
+    @property
+    def active_vacancies(self) -> int:
+        return int(self.active_bed_count - int(self.target_sizes.sum()))
 
     @property
     def vacancies(self) -> int:
@@ -262,6 +286,92 @@ def _target_sizes_from_capacities(
     return targets
 
 
+def select_active_room_capacities(
+    n_students: int,
+    capacity_mix: CapacityMix | str,
+) -> tuple[int, ...]:
+    """Select a deterministic, vacancy-minimizing subset of available rooms.
+
+    The selection minimizes active vacant beds, then the number of active rooms,
+    and finally prefers larger capacities for deterministic physical-room use.
+    """
+    if n_students < 1:
+        raise ValueError("At least one student is required for room selection.")
+    normalized = _normalize_capacity_mix(capacity_mix)
+    if normalized is None:
+        raise ValueError("A non-empty capacity mix is required.")
+
+    unique_capacities = tuple(capacity for _, capacity in normalized)
+    total_beds = sum(count * capacity for count, capacity in normalized)
+    if total_beds < n_students:
+        raise ValueError("Capacity mix does not provide enough beds for all students.")
+
+    # A minimum-capacity feasible subset never needs to exceed the student count
+    # by more than the largest single room. Keeping this bound makes the dynamic
+    # program practical even when the configured inventory is large.
+    limit = n_students + max(unique_capacities) - 1
+    empty_counts = (0,) * len(unique_capacities)
+    states: dict[int, tuple[int, ...]] = {0: empty_counts}
+
+    def selection_key(counts: tuple[int, ...]) -> tuple[object, ...]:
+        return (sum(counts), tuple(-count for count in counts))
+
+    # Binary-split each bounded count. This keeps large maximum inventories
+    # practical: 100,000 identical rooms require only 17 DP passes, not 100,000.
+    grouped_rooms: list[tuple[int, int, int]] = []
+    for capacity_index, (available_count, capacity) in enumerate(normalized):
+        useful_count = min(available_count, limit // capacity)
+        group_size = 1
+        while useful_count > 0:
+            take = min(group_size, useful_count)
+            grouped_rooms.append((capacity_index, capacity, take))
+            useful_count -= take
+            group_size *= 2
+
+    for capacity_index, capacity, room_count in grouped_rooms:
+        additions: dict[int, tuple[int, ...]] = {}
+        for bed_count, counts in list(states.items()):
+            new_bed_count = bed_count + capacity * room_count
+            if new_bed_count > limit:
+                continue
+            candidate = list(counts)
+            candidate[capacity_index] += room_count
+            candidate_counts = tuple(candidate)
+            existing = states.get(new_bed_count) or additions.get(new_bed_count)
+            if existing is None or selection_key(candidate_counts) < selection_key(
+                existing
+            ):
+                additions[new_bed_count] = candidate_counts
+        for bed_count, counts in additions.items():
+            existing = states.get(bed_count)
+            if existing is None or selection_key(counts) < selection_key(existing):
+                states[bed_count] = counts
+
+    feasible = [
+        (bed_count, counts)
+        for bed_count, counts in states.items()
+        if bed_count >= n_students
+    ]
+    selected_beds, selected_counts = min(
+        feasible,
+        key=lambda item: (
+            item[0] - n_students,
+            sum(item[1]),
+            tuple(-count for count in item[1]),
+        ),
+    )
+    del selected_beds
+    return tuple(
+        capacity
+        for capacity, count in zip(
+            unique_capacities,
+            selected_counts,
+            strict=True,
+        )
+        for _ in range(count)
+    )
+
+
 def _room_profile(n_students: int, config: OptimizationConfig) -> _RoomProfile:
     if config.capacity_mix is None:
         targets = _target_room_sizes(n_students, config.capacity)
@@ -273,7 +383,7 @@ def _room_profile(n_students: int, config: OptimizationConfig) -> _RoomProfile:
             configured_bed_count=int(capacities.sum()),
         )
 
-    capacities = np.asarray(
+    configured_capacities = np.asarray(
         [
             capacity
             for count, capacity in config.capacity_mix
@@ -281,13 +391,16 @@ def _room_profile(n_students: int, config: OptimizationConfig) -> _RoomProfile:
         ],
         dtype=np.int16,
     )
-    targets = _target_sizes_from_capacities(n_students, capacities)
-    active_capacities = capacities[: len(targets)]
+    active_capacities = np.asarray(
+        select_active_room_capacities(n_students, config.capacity_mix),
+        dtype=np.int16,
+    )
+    targets = _target_sizes_from_capacities(n_students, active_capacities)
     return _RoomProfile(
         target_sizes=targets,
         capacities=active_capacities,
-        configured_room_count=len(capacities),
-        configured_bed_count=int(capacities.sum()),
+        configured_room_count=len(configured_capacities),
+        configured_bed_count=int(configured_capacities.sum()),
     )
 
 
@@ -563,6 +676,10 @@ class RoomOptimizer:
             room_capacities=[int(capacity) for capacity in profile.capacities],
             configured_room_count=profile.configured_room_count,
             configured_bed_count=profile.configured_bed_count,
+            active_bed_count=profile.active_bed_count,
+            unused_room_count=profile.unused_room_count,
+            unused_bed_count=profile.unused_bed_count,
+            active_vacancies=profile.active_vacancies,
             vacancies=profile.vacancies,
         )
 
@@ -777,7 +894,10 @@ class RoomOptimizer:
             self.config.cp_sat_time_limit_seconds,
             max(0.5, remaining - 0.2),
         )
-        solver.parameters.num_search_workers = 4
+        # A single CP-SAT search worker and explicit seed preserve reproducibility.
+        # API-level concurrency is handled separately by the isolated RQ worker.
+        solver.parameters.num_search_workers = 1
+        solver.parameters.random_seed = self.config.seed
         status = solver.solve(model)
         status_name = solver.status_name(status)
         if status not in (cp_model.FEASIBLE, cp_model.OPTIMAL):

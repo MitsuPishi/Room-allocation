@@ -156,6 +156,28 @@ class CompatibilityScorer:
         self.config = config or ScoringConfig()
         self.chunk_size = max(1, int(chunk_size))
 
+    def explain_pair(
+        self,
+        first: pd.Series | dict[str, object],
+        second: pd.Series | dict[str, object],
+    ) -> dict[str, float]:
+        """Explain one pair without allocating the full compatibility matrix."""
+        first_row = first if isinstance(first, pd.Series) else pd.Series(first)
+        second_row = second if isinstance(second, pd.Series) else pd.Series(second)
+        missing = [
+            field
+            for field in SCORING_FIELDS
+            if field not in first_row.index or field not in second_row.index
+        ]
+        if missing:
+            raise ValueError(
+                "Normalized student data is missing scoring fields: "
+                + ", ".join(missing)
+            )
+        contributions = _pair_contributions(first_row, second_row, self.config)
+        contributions["total"] = float(sum(contributions.values()))
+        return contributions
+
     def score(self, students: pd.DataFrame) -> CompatibilityScores:
         missing = [field for field in SCORING_FIELDS if field not in students.columns]
         if missing:
