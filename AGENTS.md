@@ -5,8 +5,8 @@
 - Prefer Python 3.12 for this project.
 - Use `py -3.12` or `.\.venv\Scripts\python.exe`; avoid relying on bare `python` because Windows may route it to the Microsoft Store alias.
 - Python 3.14 may be installed on this PC, but it is not the primary runtime for this repo.
-- OR-Tools CP-SAT can terminate the Python process on this Windows setup, including near the end of Streamlit optimization runs. Keep CP-SAT off for normal local testing, but leave the explicit opt-in available for experiments.
-- Use Python 3.12 for Streamlit and regular optimizer tests. Exact-oracle tests and CP-SAT benchmark validation need a separate solver-safe environment.
+- OR-Tools CP-SAT can terminate the Python process on this Windows setup. Keep CP-SAT off for normal local testing; production runs use the isolated Linux worker and require benchmark approval before enabling it by default.
+- Use Python 3.12 for FastAPI, the worker, and regular optimizer tests. Exact-oracle tests and CP-SAT benchmark validation need a separate solver-safe environment.
 
 ## Environment Setup
 
@@ -22,12 +22,12 @@ Run commands through the venv:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\streamlit.exe run app.py
+.\.venv\Scripts\uvicorn.exe server.main:app --reload
 ```
 
 ## Project Context
 
-- The app is a Streamlit dashboard for validated university dorm room assignment.
+- The product is a Persian React dashboard backed by FastAPI and an isolated Python optimization worker.
 - Core engine code lives in `engine/`.
 - Tests live in `tests/`.
 - The optimizer supports both uniform capacity and mixed room inventories.
@@ -40,13 +40,13 @@ Run commands through the venv:
 
 - `OptimizationConfig.capacity_mix` accepts compact strings or tuples such as `((100, 6), (20, 4))`.
 - CLI supports `--capacity-mix "100x6,20x4"`; this overrides `--capacity`.
-- Streamlit has a variable room capacity option in the sidebar.
-- Streamlit also exposes CP-SAT neighborhood refinement in Advanced optimizer. It defaults off on this Windows setup and warns before enabling.
+- The production UI is a Persian React dashboard under `frontend/`; Streamlit has been removed.
+- FastAPI lives under `server/`, and optimization runs in a single RQ worker.
+- PostgreSQL stores durable runs and Redis carries job references and progress coordination.
 - CLI supports `--allow-unsafe-cp-sat` to force CP-SAT despite the runtime safety guard.
 - Metadata includes room inventory, generated capacities, total beds, occupied beds, and vacancies.
 - The legacy `DormOptimizationEngine` accepts mixed `df_rooms["capacity"]` values.
 
 ## Worktree Notes
 
-- `app.py` may show both staged and unstaged changes because it had existing staged edits before the variable-capacity work.
-- `requirements-minimal.txt` was already untracked and should not be removed unless the user asks.
+- The old `app.py` and `requirements-minimal.txt` were removed as part of the approved Streamlit replacement.

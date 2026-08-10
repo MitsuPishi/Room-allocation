@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  backend:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,4 +15,95 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest
-      - run: python -m compileall -q app.py engine tests benchmarks
+      - run: python -m compileall -q engine server tests migrations benchmarks
+      - run: python -m pip check
+      - run: python -m pip_audit
+      - name: Verify migrations upgrade and downgrade
+        shell: pwsh
+        run: |
+          $env:UNIMATE_DATABASE_URL = "sqlite:///./migration-test.sqlite3"
+          alembic upgrade head
+          alembic downgrade base
+          Remove-Item -LiteralPath migration-test.sqlite3 -ErrorAction SilentlyContinue
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=moderate
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target backend -t unimate-backend:test .
+      - run: docker build --target web -t unimate-web:test .
+      - name: Verify Persian Excel, PDF, CSV, and artifact hashes
+        run: |
+          docker run --rm -i \
+            -e UNIMATE_STORAGE_ROOT=/tmp/unimate \
+            unimate-backend:test python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          from openpyxl import load_workbook
+          import pandas as pd
+
+          from server.config import settings
+          from server.exports import generate_run_artifacts
+          from server.storage import resolve_storage_key
+
+          assignments = pd.DataFrame([{
+              "room_id": "B-401", "bed": 1, "room_capacity": 4,
+              "student_idx": 0, "student_id": "S-001",
+              "student_name": "دانشجوی نمونه", "student_utility": 92.5,
+              "room_quality": 91.0,
+          }])
+          rooms = pd.DataFrame([{
+              "room_id": "B-401", "room_size": 1, "room_capacity": 4,
+              "room_quality": 91.0, "mean_student_utility": 92.5,
+          }])
+          students = assignments[[
+              "student_idx", "student_id", "room_id", "student_utility"
+          ]]
+          validation = pd.DataFrame(columns=["severity", "code", "row", "field", "value", "message"])
+          metadata = {
+              "status": "succeeded", "algorithm_version": "smoke", "runtime_seconds": 0.1,
+              "metrics": {"min_student_utility": 92.5, "p10_room_quality": 91.0, "mean_student_utility": 92.5},
+              "room_inventory": {
+                  "occupied_beds": 1, "assigned_rooms": 1, "unused_rooms": 1,
+                  "active_vacancies": 3, "total_rooms": 2, "active_beds": 4,
+              },
+          }
+          manifest = generate_run_artifacts(
+              "export-smoke", assignments, rooms, students, validation, metadata
+          )
+          assert {"unimate_report.xlsx", "unimate_report.pdf", "assignments.csv", "run_metadata.json"} <= set(manifest)
+          for item in manifest.values():
+              path = resolve_storage_key(item["storage_key"])
+              content = path.read_bytes()
+              assert hashlib.sha256(content).hexdigest() == item["sha256"]
+              assert len(content) == item["size"]
+          workbook_path = resolve_storage_key(manifest["unimate_report.xlsx"]["storage_key"])
+          workbook = load_workbook(workbook_path, read_only=False)
+          assert workbook.sheetnames == ["خلاصه", "تخصیص‌ها", "اتاق‌ها", "دانشجویان", "اعتبارسنجی"]
+          assert all(sheet.sheet_view.rightToLeft for sheet in workbook.worksheets)
+          assert workbook["تخصیص‌ها"]["A1"].value == "شناسه اتاق"
+          pdf = resolve_storage_key(manifest["unimate_report.pdf"]["storage_key"]).read_bytes()
+          assert pdf.startswith(b"%PDF-") and len(pdf) > 1_000
+          csv_header = resolve_storage_key(manifest["assignments.csv"]["storage_key"]).read_text(encoding="utf-8-sig").splitlines()[0]
+          assert csv_header.startswith("room_id,bed,room_capacity,student_idx")
+          print("artifact smoke verification passed")
+          PY

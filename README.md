@@ -1,94 +1,100 @@
-# UniMate Room Assignment
+# UniMate University Room Allocation
 
-UniMate is a validated, reproducible room-assignment system for university
-dormitories. It uses the original housing questionnaire and a transparent
-multi-criteria optimizer. The deprecated clustering workflow is retained only
-under `legacy/`.
+UniMate is an on-premises, auditable dorm-room assignment product. A Persian
+React dashboard is backed by FastAPI, PostgreSQL, Redis/RQ, and the validated
+Python optimization engine. Optimization runs in a dedicated worker process so
+uploads, reporting, and dashboard traffic do not compete with the solver.
 
-## What the system claims
+## Product capabilities
 
-- Every accepted row is validated against an explicit questionnaire schema.
-- Room capacities are respected, including mixed room inventories.
-- Compatibility scores are reproducible and explainable by four dimensions.
-- The optimizer protects the weakest student and lower-quality rooms before
-  improving the global mean.
-- Large runs are reported as `best_found`; global optimality is not claimed.
+- Persian RTL workflow for questionnaire upload, validation, configuration,
+  progress monitoring, investigation, and export.
+- Reproducible fairness-first assignment for uniform or mixed room inventories.
+- Automatic selection of the smallest sufficient room subset before roommate
+  compatibility optimization.
+- One local administrator with forced initial password rotation, revocable
+  sessions, CSRF protection, login throttling, and authenticated downloads.
+- Durable run history and non-PII audit events until explicit administrator
+  deletion.
+- Persian Excel and PDF reports plus UTF-8 CSV and JSON reproducibility files.
+- Encrypted nightly backups with a rolling 30-day default.
 
-The system does **not** yet claim that its scores predict roommate satisfaction.
-No historical outcome labels are available. See
-[`Docs/METHODOLOGY.md`](Docs/METHODOLOGY.md) for the research and validation
-policy.
+The optimizer reports large runs as `best_found`; it does not claim global
+optimality or validated prediction of roommate satisfaction. See
+[`Docs/METHODOLOGY.md`](Docs/METHODOLOGY.md).
 
-## Supported input
+## Production deployment
 
-Use the original Persian or equivalent English questionnaire fields:
+Requirements: a university-managed Linux server, Docker Engine with Compose,
+and an HTTPS reverse proxy.
 
-- sleep window
-- wake window
-- noise tolerance
-- study environment
-- cleanliness
-- optional faculty, major, age, residence, ethnicity, and religion
-- optional student ID and name
+```bash
+cp .env.example .env
+# Replace every placeholder in .env with independent, strong secrets.
+docker compose up -d --build
+docker compose ps
+```
 
-One-hot encoded files are intentionally rejected. Religion, ethnicity, and
-residence are retained only for authorized auditing and are never used in
-compatibility scores.
+The dashboard listens on port `8080` by default. TLS must terminate at the
+university reverse proxy, which forwards the original `Host`,
+`X-Forwarded-For`, and `X-Forwarded-Proto` headers. The initial administrator
+must change the deployment password on first login.
 
-## Installation
+Do not enable `UNIMATE_CP_SAT_DEFAULT` until the 1,000- and 5,000-student
+acceptance benchmarks pass on the deployment server.
 
-Python 3.12 is the supported runtime.
+Detailed deployment, backup, restore, upgrade, and incident procedures are in
+[`Docs/OPERATIONS.md`](Docs/OPERATIONS.md). Security controls and data deletion
+behavior are in [`Docs/SECURITY.md`](Docs/SECURITY.md). The final server-side
+sign-off procedure is in [`Docs/ACCEPTANCE.md`](Docs/ACCEPTANCE.md).
+
+## Local development
+
+Python 3.12 is the supported backend runtime.
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install -U pip
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+$env:UNIMATE_INLINE_JOBS="true"
+.\.venv\Scripts\uvicorn.exe server.main:app --reload
 ```
 
-Do not reuse the old checked-in Linux virtual environment on Windows.
-
-## Streamlit
+In a second terminal:
 
 ```powershell
-streamlit run app.py
+cd frontend
+npm.cmd install
+npm.cmd run dev
 ```
 
-The default example is `Data/MOCK_DATA-Women.csv`. Uniform capacity defaults to
-six. Enable variable room capacities to enter compact inventories such as
-`100x6,20x4`. The production scoring weights are fixed equally across the four
-dimensions. Adjustable weights are clearly marked as sensitivity analysis.
-On this Windows setup, CP-SAT neighborhood refinement defaults off in the
-dashboard because the installed OR-Tools solver can terminate Streamlit near the
-end of an optimization run. You can still turn it on explicitly from Advanced
-optimizer when you want to experiment.
+The development administrator defaults to `admin` / `change-me-now` and must be
+changed immediately. Never use those values in production.
 
-## Command line
+## Validation
 
 ```powershell
-python -m engine assign `
-  --input Data/MOCK_DATA-Women.csv `
-  --output-dir results/women-2026 `
-  --capacity 6 `
-  --time-limit 300 `
-  --seed 42
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m compileall -q engine server tests migrations benchmarks
+cd frontend
+npm.cmd run build
+npm.cmd run e2e
+npm.cmd audit --audit-level=moderate
 ```
 
-On Windows, the CLI also keeps the CP-SAT safety guard unless you explicitly
-opt in:
+For deployment benchmarks:
 
 ```powershell
-python -m engine assign `
-  --input Data/MOCK_DATA-Women.csv `
-  --output-dir results/women-2026-cpsat `
-  --capacity 6 `
-  --allow-unsafe-cp-sat
+.\.venv\Scripts\python.exe benchmarks\run_benchmark.py --students 1000 --time-limit 300
+.\.venv\Scripts\python.exe benchmarks\run_benchmark.py --students 5000 --time-limit 300
 ```
 
-For mixed room inventories, use count-by-capacity entries. For example, this
-means 100 rooms with six beds and 20 rooms with four beds:
+## CLI and Python API
+
+The web migration does not remove the reproducible CLI or engine API.
 
 ```powershell
-python -m engine assign `
+.\.venv\Scripts\python.exe -m engine assign `
   --input Data/MOCK_DATA-Women.csv `
   --output-dir results/women-2026 `
   --capacity-mix "100x6,20x4" `
@@ -96,56 +102,23 @@ python -m engine assign `
   --seed 42
 ```
 
-Each run produces:
-
-- `assignments.csv`
-- `room_metrics.csv`
-- `student_metrics.csv`
-- `validation_report.csv`
-- `run_metadata.json`
-
-Metadata includes the algorithm and scoring versions, seed, configuration,
-runtime, data hash, configuration hash, metrics, and search history.
-
-## Tests and benchmarks
-
-```powershell
-python -m unittest discover -s tests -v
-python benchmarks/run_benchmark.py --students 1000 --time-limit 300
-python benchmarks/run_benchmark.py --students 5000 --time-limit 300
-```
-
-The exact total-score oracle is limited to small instances and is used only to
-measure heuristic gaps. It does not replace the production fairness objective.
-
-## Public engine API
-
 ```python
-from engine import (
-    CompatibilityScorer,
-    OptimizationConfig,
-    RoomOptimizer,
-    parse_student_survey,
-)
+from engine import CompatibilityScorer, OptimizationConfig, RoomOptimizer
 
-parsed = parse_student_survey(raw_dataframe, strict=True)
-scores = CompatibilityScorer().score(parsed.data)
+scores = CompatibilityScorer().score(normalized_students)
 result = RoomOptimizer(
-    OptimizationConfig(capacity=6, time_limit_seconds=300, seed=42)
-).optimize(parsed.data, scores)
+    OptimizationConfig(capacity_mix=((100, 6), (20, 4)), seed=42)
+).optimize(normalized_students, scores)
 ```
 
-Mixed capacity example:
+## Repository layout
 
-```python
-result = RoomOptimizer(
-    OptimizationConfig(
-        capacity_mix=((100, 6), (20, 4)),
-        time_limit_seconds=300,
-        seed=42,
-    )
-).optimize(parsed.data, scores)
-```
+- `frontend/`: Persian React/TypeScript dashboard.
+- `server/`: FastAPI, security, persistence, worker, and export services.
+- `engine/`: validated scoring and optimization engine.
+- `migrations/`: PostgreSQL/SQLAlchemy schema migrations.
+- `ops/`: reverse-proxy and encrypted backup tooling.
+- `tests/`: engine and API integration tests.
 
 ## License
 

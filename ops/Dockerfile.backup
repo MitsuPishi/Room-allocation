@@ -1,0 +1,6 @@
+FROM postgres:16-alpine
+RUN apk add --no-cache openssl
+COPY ops/backup-loop.sh /usr/local/bin/backup-loop.sh
+COPY ops/restore.sh /usr/local/bin/restore.sh
+RUN chmod +x /usr/local/bin/backup-loop.sh /usr/local/bin/restore.sh
+CMD ["/usr/local/bin/backup-loop.sh"]
