@@ -18,6 +18,7 @@ import {
   Download,
   FileCheck2,
   History,
+  Eye,
   LayoutDashboard,
   LoaderCircle,
   LogOut,
@@ -78,7 +79,7 @@ function LoginPage() {
       <div className="brand-mark"><BedDouble size={30} /></div>
       <p className="eyebrow">سامانه رسمی امور خوابگاه</p>
       <h1>تخصیص منصفانه،<br />تصمیم‌گیری قابل دفاع.</h1>
-      <p>یونی‌میت داده‌های پرسشنامه را اعتبارسنجی می‌کند، تخصیص را با معیارهای شفاف انجام می‌دهد و تمام مراحل را برای ممیزی ثبت می‌کند.</p>
+      <p>یونی‌میت داده‌های پرسشنامه را اعتبارسنجی می‌کند، تخصیص را با معیارهای شفاف انجام می‌دهد و تمام مراحل را در تاریخچه نگه می‌دارد.</p>
       <div className="trust-row"><span><ShieldCheck /> داده‌ها در دانشگاه می‌مانند</span><span><BookOpenCheck /> امتیازها توضیح‌پذیرند</span></div>
     </section>
     <section className="login-panel">
@@ -132,7 +133,7 @@ function Shell({ children }: { children: ReactNode }) {
       <nav>
         <NavLink to="/" end><LayoutDashboard /> نمای کلی</NavLink>
         <NavLink to="/runs/new"><Plus /> تخصیص جدید</NavLink>
-        <NavLink to="/audit"><History /> رویدادهای ممیزی</NavLink>
+        <NavLink to="/audit"><History /> تاریخچه فعالیت‌ها</NavLink>
       </nav>
       <div className="sidebar-foot"><div className="admin-chip"><span>{session?.username.slice(0, 1).toUpperCase()}</span><div><strong>{session?.username}</strong><small>مدیر سامانه</small></div></div><button className="logout" onClick={logout}><LogOut /> خروج</button></div>
     </aside>
@@ -226,9 +227,9 @@ function NewRunPage() {
       {sensitivity && <div className="form-grid four">{Object.entries(weights).map(([key, value]) => <label key={key}>{({ cleanliness: "نظافت", noise: "تحمل صدا", study: "مطالعه", schedule: "برنامه خواب" } as Record<string, string>)[key]}<input type="number" min={0} max={100} value={value} onChange={(e) => setWeights({ ...weights, [key]: Number(e.target.value) })} /></label>)}</div>}
       <div className="wizard-actions"><button className="button ghost" onClick={() => setStep(1)}><ChevronRight /> مرحله قبل</button><button className="button primary" disabled={mode === "mixed" && !!dataset && totalBeds < dataset.row_count} onClick={() => setStep(3)}>مرور نهایی <ChevronLeft /></button></div>
     </section>}
-    {step === 3 && <section className="panel wizard-panel"><div className="section-title"><span>۳</span><div><h2>مرور و شروع تخصیص</h2><p>این تنظیمات با داده و نسخه الگوریتم ثبت می‌شوند و بعداً قابل ممیزی هستند.</p></div></div>
+    {step === 3 && <section className="panel wizard-panel"><div className="section-title"><span>۳</span><div><h2>مرور و شروع تخصیص</h2><p>این تنظیمات همراه با نتیجه ذخیره می‌شوند و بعداً در تاریخچه در دسترس هستند.</p></div></div>
       <div className="review-grid"><div><span>فایل داده</span><strong>{dataset?.original_filename}</strong><small>{formatNumber(dataset?.row_count)} دانشجو</small></div><div><span>موجودی</span><strong>{mode === "uniform" ? `اتاق‌های ${capacity} نفره` : `${mix.length} نوع اتاق`}</strong><small>{mode === "mixed" ? `${formatNumber(totalBeds)} تخت موجود` : "تعداد اتاق خودکار"}</small></div><div><span>بودجه جست‌وجو</span><strong>{formatNumber(timeLimit)} ثانیه</strong><small>{formatNumber(restarts)} شروع مجدد</small></div><div><span>سیاست امتیاز</span><strong>{sensitivity ? "تحلیل حساسیت" : "وزن‌های تولیدی برابر"}</strong><small>ویژگی‌های حساس در امتیاز وارد نمی‌شوند</small></div></div>
-      <div className="alert info"><ShieldCheck /> فایل، تنظیمات، نتیجه و دریافت خروجی‌ها در رویدادهای ممیزی ثبت می‌شوند.</div>
+      <div className="alert info"><ShieldCheck /> فایل، تنظیمات، نتیجه و دریافت خروجی‌ها در تاریخچه ثبت می‌شوند.</div>
       <div className="wizard-actions"><button className="button ghost" onClick={() => setStep(2)}><ChevronRight /> مرحله قبل</button><button className="button primary" disabled={mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? <LoaderCircle className="spin" /> : <Activity />} ارسال به صف تخصیص</button></div>
     </section>}
   </>;
@@ -260,9 +261,104 @@ function RunProgress({ run }: { run: Run }) {
   return <section className="panel progress-panel"><div className={`progress-orbit ${run.status}`}><Activity /></div><StatusBadge status={run.status} /><h2>{phase}</h2><p>محاسبات در یک فرایند مستقل اجرا می‌شوند؛ می‌توانید این صفحه را ببندید و بعداً بازگردید.</p>{run.status === "failed" && <div className="alert danger">{run.error_message}</div>}<div className="progress-track"><span /></div></section>;
 }
 
-type RoomRow = { room_id: string; room_size: number; room_capacity: number; room_quality: number; mean_student_utility: number };
-type StudentRow = { room_id: string; bed: number; room_capacity: number; student_idx: number; student_id: string; student_name: string; student_utility: number; room_quality: number };
+type RoomRow = {
+  room_id: string;
+  room_size: number;
+  room_capacity: number;
+  room_quality: number;
+  mean_student_utility: number;
+  cleanliness_contribution?: number;
+  noise_contribution?: number;
+  study_contribution?: number;
+  schedule_contribution?: number;
+};
+type StudentRow = {
+  room_id: string;
+  bed: number;
+  room_capacity: number;
+  student_idx: number;
+  student_id: string;
+  student_name: string;
+  student_utility: number;
+  room_quality: number;
+  faculty?: string | null;
+  major?: string | null;
+  age?: number | null;
+  sleep_window?: number | null;
+  wake_window?: number | null;
+  noise_tolerance?: number | null;
+  study_habit?: number | null;
+  cleanliness?: number | null;
+};
 const AUDIT_LABELS: Record<string, string> = { login_succeeded: "ورود موفق", login_failed: "ورود ناموفق", logout: "خروج", password_changed: "تغییر رمز", dataset_uploaded: "بارگذاری داده", dataset_validated: "اعتبارسنجی داده", run_created: "ایجاد اجرا", run_queued: "ارسال به صف", run_started: "شروع اجرا", run_completed: "تکمیل اجرا", run_failed: "شکست اجرا", run_cancel_requested: "درخواست لغو", run_cancelled: "لغو اجرا", artifact_downloaded: "دریافت خروجی", run_deleted: "حذف اجرا" };
+const CONTRIBUTION_LABELS: Array<[keyof RoomRow, string]> = [
+  ["cleanliness_contribution", "نظافت"],
+  ["noise_contribution", "تحمل صدا"],
+  ["study_contribution", "مطالعه"],
+  ["schedule_contribution", "برنامه خواب"],
+];
+const SLEEP_LABELS = ["۲۲ تا ۲۳", "۲۳ تا ۲۴", "۲۴ تا ۱", "۱ تا ۲", "۲ تا ۳"];
+const WAKE_LABELS = ["۴ تا ۵", "۵ تا ۶", "۶ تا ۷", "۷ تا ۸"];
+
+function scheduleLabel(value: number | null | undefined, labels: string[]) {
+  return value == null ? "ثبت نشده" : labels[value] ?? formatNumber(value);
+}
+
+function preferenceLabel(field: "noise_tolerance" | "study_habit" | "cleanliness", value: number | null | undefined) {
+  if (value == null) return "ثبت نشده";
+  if (field === "noise_tolerance") return value === 1 ? "محیط پرجنب‌وجوش" : "محیط آرام";
+  if (field === "study_habit") return value === 1 ? "مطالعه در سکوت" : "مطالعه با صدا";
+  return value === 1 ? "نظم‌طلب" : "راحت‌طلب";
+}
+
+function ProfileChips({ student, compact = false }: { student: StudentRow; compact?: boolean }) {
+  const items = compact
+    ? [preferenceLabel("cleanliness", student.cleanliness), preferenceLabel("noise_tolerance", student.noise_tolerance)]
+    : [
+      preferenceLabel("cleanliness", student.cleanliness),
+      preferenceLabel("noise_tolerance", student.noise_tolerance),
+      preferenceLabel("study_habit", student.study_habit),
+      `خواب ${scheduleLabel(student.sleep_window, SLEEP_LABELS)}`,
+      `بیداری ${scheduleLabel(student.wake_window, WAKE_LABELS)}`,
+    ];
+  return <span className="profile-chips">{items.map((item) => <small key={item}>{item}</small>)}</span>;
+}
+
+function RoomContributions({ room }: { room: RoomRow }) {
+  const values = CONTRIBUTION_LABELS.map(([key, label]) => ({ label, value: Number(room[key] ?? 0) }));
+  const palette = ["#2f7f75", "#6aa399", "#b87945", "#d5a979"];
+  return <div className="contribution-block"><div className="contribution-bar" aria-label="ترکیب امتیاز معیارهای اتاق">{values.map((item, index) => <span key={item.label} style={{ width: `${Math.max(0, item.value)}%`, background: palette[index] }} />)}</div><div className="contribution-legend">{values.map((item, index) => <div key={item.label}><i style={{ background: palette[index] }} /><span>{item.label}</span><strong>{formatNumber(item.value, 1)}</strong></div>)}</div></div>;
+}
+
+function InspectorFrame({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
+  }, [onClose]);
+  return <div className="inspector-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="inspector" role="dialog" aria-modal="true" aria-label={title}><header><div><p className="eyebrow">نمای بازرسی</p><h2>{title}</h2><span>{subtitle}</span></div><button className="icon-button" aria-label="بستن جزئیات" onClick={onClose}><X /></button></header><div className="inspector-body">{children}</div></aside></div>;
+}
+
+function RoomInspector({ runId, room, onClose }: { runId: string; room: RoomRow; onClose: () => void }) {
+  const residents = useQuery({ queryKey: ["room-residents", runId, room.room_id], queryFn: () => api<Page<StudentRow>>(`/runs/${runId}/students?room_id=${encodeURIComponent(room.room_id)}&offset=0&limit=500`) });
+  return <InspectorFrame title={`اتاق ${room.room_id}`} subtitle={`${formatNumber(room.room_size)} ساکن از ظرفیت ${formatNumber(room.room_capacity)} نفر`} onClose={onClose}>
+    <div className="inspector-metrics"><div><span>کیفیت اتاق</span><strong>{formatNumber(room.room_quality, 1)}</strong></div><div><span>میانگین امتیاز ساکنان</span><strong>{formatNumber(room.mean_student_utility, 1)}</strong></div><div><span>تخت خالی</span><strong>{formatNumber(room.room_capacity - room.room_size)}</strong></div></div>
+    <section className="inspector-section"><div className="inspector-section-title"><h3>اجزای کیفیت اتاق</h3><small>سهم هر معیار از امتیاز نهایی ۱۰۰</small></div><RoomContributions room={room} /></section>
+    <section className="inspector-section"><div className="inspector-section-title"><h3>ساکنان اتاق</h3><small>{formatNumber(residents.data?.total ?? room.room_size)} دانشجو</small></div>{residents.isLoading ? <Loading label="دریافت فهرست ساکنان" /> : <div className="resident-list">{(residents.data?.items ?? []).map((student) => <article key={student.student_idx}><span className="bed-number">{formatNumber(student.bed)}</span><div><strong>{student.student_name}</strong><small>{student.student_id}</small><ProfileChips student={student} compact /></div><span className="resident-score"><small>امتیاز فردی</small><strong>{formatNumber(student.student_utility, 1)}</strong></span></article>)}</div>}</section>
+  </InspectorFrame>;
+}
+
+function StudentInspector({ runId, student, onClose }: { runId: string; student: StudentRow; onClose: () => void }) {
+  const room = useQuery({ queryKey: ["student-room", runId, student.room_id], queryFn: () => api<Page<StudentRow>>(`/runs/${runId}/students?room_id=${encodeURIComponent(student.room_id)}&offset=0&limit=500`) });
+  const roommates = (room.data?.items ?? []).filter((item) => item.student_idx !== student.student_idx);
+  return <InspectorFrame title={student.student_name} subtitle={`${student.student_id} · اتاق ${student.room_id} · تخت ${formatNumber(student.bed)}`} onClose={onClose}>
+    <div className="inspector-metrics"><div><span>امتیاز فردی</span><strong>{formatNumber(student.student_utility, 1)}</strong></div><div><span>کیفیت اتاق</span><strong>{formatNumber(student.room_quality, 1)}</strong></div><div><span>هم‌اتاقی</span><strong>{formatNumber(Math.max(0, (room.data?.total ?? 1) - 1))}</strong></div></div>
+    <section className="inspector-section"><div className="inspector-section-title"><h3>پروفایل و ترجیحات</h3><small>فقط ویژگی‌های غیرحساس مورد استفاده در تخصیص</small></div><dl className="profile-grid"><div><dt>دانشکده</dt><dd>{student.faculty || "ثبت نشده"}</dd></div><div><dt>رشته</dt><dd>{student.major || "ثبت نشده"}</dd></div><div><dt>سن</dt><dd>{student.age == null ? "ثبت نشده" : `${formatNumber(student.age)} سال`}</dd></div><div><dt>زمان خواب</dt><dd>{scheduleLabel(student.sleep_window, SLEEP_LABELS)}</dd></div><div><dt>زمان بیداری</dt><dd>{scheduleLabel(student.wake_window, WAKE_LABELS)}</dd></div><div><dt>نظافت</dt><dd>{preferenceLabel("cleanliness", student.cleanliness)}</dd></div><div><dt>تحمل صدا</dt><dd>{preferenceLabel("noise_tolerance", student.noise_tolerance)}</dd></div><div><dt>عادت مطالعه</dt><dd>{preferenceLabel("study_habit", student.study_habit)}</dd></div></dl></section>
+    <section className="inspector-section"><div className="inspector-section-title"><h3>ترکیب هم‌اتاقی‌ها</h3><small>برای بررسی سریع زمینه امتیاز فردی</small></div>{room.isLoading ? <Loading label="دریافت هم‌اتاقی‌ها" /> : roommates.length ? <div className="resident-list roommates">{roommates.map((item) => <article key={item.student_idx}><span className="bed-number">{formatNumber(item.bed)}</span><div><strong>{item.student_name}</strong><small>{item.student_id}</small><ProfileChips student={item} compact /></div><span className="resident-score"><small>امتیاز</small><strong>{formatNumber(item.student_utility, 1)}</strong></span></article>)}</div> : <div className="inline-empty">این دانشجو هم‌اتاقی ندارد.</div>}</section>
+  </InspectorFrame>;
+}
 
 function Pager({ page, limit, total, setPage }: { page: number; limit: number; total: number; setPage: (page: number) => void }) {
   const pages = Math.max(1, Math.ceil(total / limit));
@@ -270,50 +366,49 @@ function Pager({ page, limit, total, setPage }: { page: number; limit: number; t
 }
 
 function RoomsTab({ runId }: { runId: string }) {
-  const [query, setQuery] = useState(""); const [page, setPage] = useState(0); const limit = 50;
-  const result = useQuery({ queryKey: ["rooms", runId, query, page], queryFn: () => api<Page<RoomRow>>(`/runs/${runId}/rooms?query=${encodeURIComponent(query)}&offset=${page * limit}&limit=${limit}`) });
+  const [query, setQuery] = useState(""); const [page, setPage] = useState(0); const [minQuality, setMinQuality] = useState(""); const [maxQuality, setMaxQuality] = useState(""); const [selected, setSelected] = useState<RoomRow | null>(null); const limit = 50;
+  const qualityParams = `${minQuality ? `&min_quality=${encodeURIComponent(minQuality)}` : ""}${maxQuality ? `&max_quality=${encodeURIComponent(maxQuality)}` : ""}`;
+  const result = useQuery({ queryKey: ["rooms", runId, query, minQuality, maxQuality, page], queryFn: () => api<Page<RoomRow>>(`/runs/${runId}/rooms?query=${encodeURIComponent(query)}${qualityParams}&offset=${page * limit}&limit=${limit}`) });
   const columns = useMemo<ColumnDef<RoomRow>[]>(() => [
-    { accessorKey: "room_id", header: "اتاق" }, { accessorKey: "room_size", header: "ساکنان", cell: ({ getValue }) => formatNumber(getValue<number>()) }, { accessorKey: "room_capacity", header: "ظرفیت", cell: ({ getValue }) => formatNumber(getValue<number>()) }, { accessorKey: "room_quality", header: "کیفیت", cell: ({ getValue }) => <strong className="score">{formatNumber(getValue<number>(), 1)}</strong> }, { accessorKey: "mean_student_utility", header: "میانگین امتیاز", cell: ({ getValue }) => formatNumber(getValue<number>(), 1) },
+    { accessorKey: "room_id", header: "اتاق", cell: ({ getValue }) => <strong>{getValue<string>()}</strong> },
+    { id: "occupancy", header: "اشغال", cell: ({ row }) => <span className="occupancy-cell"><span><i style={{ width: `${(row.original.room_size / row.original.room_capacity) * 100}%` }} /></span><small>{formatNumber(row.original.room_size)} از {formatNumber(row.original.room_capacity)}</small></span> },
+    { accessorKey: "room_quality", header: "کیفیت", cell: ({ getValue }) => <strong className="score">{formatNumber(getValue<number>(), 1)}</strong> },
+    { accessorKey: "mean_student_utility", header: "میانگین امتیاز", cell: ({ getValue }) => formatNumber(getValue<number>(), 1) },
+    { id: "dominant", header: "قوی‌ترین معیار", cell: ({ row }) => { const item = CONTRIBUTION_LABELS.map(([key, label]) => ({ label, value: Number(row.original[key] ?? 0) })).sort((a, b) => b.value - a.value)[0]; return <span className="criterion-cell"><strong>{item.label}</strong><small>{formatNumber(item.value, 1)} امتیاز</small></span>; } },
+    { id: "inspect", header: "", cell: ({ row }) => <button className="inspect-button" onClick={() => setSelected(row.original)}><Eye /> جزئیات</button> },
   ], []);
-  return <section className="panel"><div className="panel-head"><div><h2>اتاق‌های تخصیص‌یافته</h2><p>اتاق‌های ضعیف‌تر ابتدا نمایش داده می‌شوند.</p></div><label className="search"><Search /><input placeholder="جست‌وجوی شناسه اتاق" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} /></label></div>{result.isLoading ? <Loading /> : <DataGrid data={result.data?.items ?? []} columns={columns} />}<Pager page={page} limit={limit} total={result.data?.total ?? 0} setPage={setPage} /></section>;
+  return <><section className="panel"><div className="panel-head result-head"><div><h2>اتاق‌های تخصیص‌یافته</h2><p>اتاق‌های ضعیف‌تر ابتدا نمایش داده می‌شوند؛ برای مشاهده ترکیب هر اتاق جزئیات را باز کنید.</p></div><div className="result-filters"><label className="search"><Search /><input placeholder="جست‌وجوی شناسه اتاق" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} /></label><label className="range-filter"><span>کیفیت از</span><input aria-label="حداقل کیفیت" type="number" min="0" max="100" placeholder="۰" value={minQuality} onChange={(e) => { setMinQuality(e.target.value); setPage(0); }} /></label><label className="range-filter"><span>تا</span><input aria-label="حداکثر کیفیت" type="number" min="0" max="100" placeholder="۱۰۰" value={maxQuality} onChange={(e) => { setMaxQuality(e.target.value); setPage(0); }} /></label></div></div>{result.isLoading ? <Loading /> : <DataGrid data={result.data?.items ?? []} columns={columns} />}<Pager page={page} limit={limit} total={result.data?.total ?? 0} setPage={setPage} /></section>{selected && <RoomInspector runId={runId} room={selected} onClose={() => setSelected(null)} />}</>;
 }
 
 function StudentsTab({ runId }: { runId: string }) {
-  const [query, setQuery] = useState(""); const [page, setPage] = useState(0); const limit = 50;
+  const [query, setQuery] = useState(""); const [page, setPage] = useState(0); const [selected, setSelected] = useState<StudentRow | null>(null); const limit = 50;
   const result = useQuery({ queryKey: ["students", runId, query, page], queryFn: () => api<Page<StudentRow>>(`/runs/${runId}/students?query=${encodeURIComponent(query)}&offset=${page * limit}&limit=${limit}`) });
   const columns = useMemo<ColumnDef<StudentRow>[]>(() => [
-    { id: "student", header: "دانشجو", cell: ({ row }) => <span className="student-cell"><strong>{row.original.student_name}</strong><small>{row.original.student_id}</small></span> }, { accessorKey: "room_id", header: "اتاق" }, { accessorKey: "bed", header: "تخت", cell: ({ getValue }) => formatNumber(getValue<number>()) }, { accessorKey: "student_utility", header: "امتیاز فردی", cell: ({ getValue }) => <strong className="score">{formatNumber(getValue<number>(), 1)}</strong> }, { accessorKey: "room_quality", header: "کیفیت اتاق", cell: ({ getValue }) => formatNumber(getValue<number>(), 1) },
+    { id: "student", header: "دانشجو", cell: ({ row }) => <span className="student-cell"><strong>{row.original.student_name}</strong><small>{row.original.student_id}{row.original.major ? ` · ${row.original.major}` : ""}</small></span> },
+    { id: "placement", header: "جانمایی", cell: ({ row }) => <span className="criterion-cell"><strong>اتاق {row.original.room_id}</strong><small>تخت {formatNumber(row.original.bed)} از {formatNumber(row.original.room_capacity)}</small></span> },
+    { id: "profile", header: "خلاصه ترجیحات", cell: ({ row }) => <ProfileChips student={row.original} compact /> },
+    { accessorKey: "student_utility", header: "امتیاز فردی", cell: ({ getValue }) => <strong className="score">{formatNumber(getValue<number>(), 1)}</strong> },
+    { id: "inspect", header: "", cell: ({ row }) => <button className="inspect-button" onClick={() => setSelected(row.original)}><Eye /> مشاهده</button> },
   ], []);
-  return <section className="panel"><div className="panel-head"><div><h2>دانشجویان</h2><p>دانشجویان با امتیاز کمتر در ابتدای فهرست هستند.</p></div><label className="search"><Search /><input placeholder="نام، شناسه یا اتاق" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} /></label></div>{result.isLoading ? <Loading /> : <DataGrid data={result.data?.items ?? []} columns={columns} />}<Pager page={page} limit={limit} total={result.data?.total ?? 0} setPage={setPage} /></section>;
-}
-
-function StudentPicker({ label, runId, selected, onSelect }: { label: string; runId: string; selected: StudentRow | null; onSelect: (student: StudentRow | null) => void }) {
-  const [query, setQuery] = useState("");
-  const students = useQuery({
-    queryKey: ["pair-student-search", runId, query],
-    queryFn: () => api<Page<StudentRow>>(`/runs/${runId}/students?query=${encodeURIComponent(query)}&offset=0&limit=20`),
-  });
-  return <div className="student-picker"><label>{label}<div className="picker-input"><Search /><input value={selected ? `${selected.student_name} — ${selected.student_id}` : query} placeholder="نام یا شناسه دانشجو" onChange={(event) => { onSelect(null); setQuery(event.target.value); }} />{selected && <button type="button" aria-label="پاک‌کردن انتخاب" onClick={() => { onSelect(null); setQuery(""); }}><X /></button>}</div></label>
-    {!selected && <div className="picker-results">{students.isLoading ? <small>در حال جست‌وجو…</small> : (students.data?.items ?? []).map((student) => <button type="button" key={student.student_idx} onClick={() => onSelect(student)}><strong>{student.student_name}</strong><span>{student.student_id} · اتاق {student.room_id}</span></button>)}</div>}
-  </div>;
-}
-
-function InvestigateTab({ runId }: { runId: string }) {
-  const [first, setFirst] = useState<StudentRow | null>(null); const [second, setSecond] = useState<StudentRow | null>(null);
-  const pair = useQuery({ queryKey: ["pair", runId, first?.student_idx, second?.student_idx], queryFn: () => api<Record<string, number>>(`/runs/${runId}/pair?first_idx=${first!.student_idx}&second_idx=${second!.student_idx}`), enabled: !!first && !!second && first.student_idx !== second.student_idx });
-  const labels: Record<string, string> = { cleanliness: "نظافت", noise: "تحمل صدا", study: "محیط مطالعه", schedule: "برنامه خواب" };
-  const chartData = Object.entries(pair.data ?? {}).filter(([key]) => key !== "total");
-  return <section className="panel investigate"><div className="panel-head"><div><h2>بررسی سازگاری دو دانشجو</h2><p>سهم هر معیار بدون ساخت دوباره ماتریس کامل محاسبه می‌شود.</p></div></div><div className="pair-selectors"><StudentPicker label="دانشجوی اول" runId={runId} selected={first} onSelect={setFirst} /><span>+</span><StudentPicker label="دانشجوی دوم" runId={runId} selected={second} onSelect={setSecond} /></div>{first && second && first.student_idx === second.student_idx ? <div className="alert info">دو دانشجوی متفاوت انتخاب کنید.</div> : pair.data ? <div className="pair-result"><div className="pair-score"><span>سازگاری کل</span><strong>{formatNumber(pair.data.total, 1)}</strong><small>از ۱۰۰</small></div><ReactECharts echarts={echarts} option={{ color: ["#2f7f75"], grid: { left: 40, right: 20, top: 20, bottom: 45 }, tooltip: {}, xAxis: { type: "category", data: chartData.map(([key]) => labels[key] ?? key) }, yAxis: { type: "value", max: 25 }, series: [{ type: "bar", data: chartData.map(([, value]) => value), barMaxWidth: 48, itemStyle: { borderRadius: [7, 7, 0, 0] } }] }} /></div> : <EmptyState title="دو دانشجو را انتخاب کنید" text="جزئیات سازگاری و سهم معیارها در این بخش نمایش داده می‌شود." />}</section>;
+  return <><section className="panel"><div className="panel-head"><div><h2>دانشجویان</h2><p>دانشجویان با امتیاز کمتر در ابتدای فهرست هستند؛ نمای کامل، ترجیحات و هم‌اتاقی‌ها را نشان می‌دهد.</p></div><label className="search"><Search /><input placeholder="نام، شناسه یا اتاق" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} /></label></div>{result.isLoading ? <Loading /> : <DataGrid data={result.data?.items ?? []} columns={columns} />}<Pager page={page} limit={limit} total={result.data?.total ?? 0} setPage={setPage} /></section>{selected && <StudentInspector runId={runId} student={selected} onClose={() => setSelected(null)} />}</>;
 }
 
 function ExportsTab({ run }: { run: Run }) {
-  const labels: Record<string, string> = { "unimate_report.xlsx": "گزارش کامل Excel", "unimate_report.pdf": "گزارش رسمی PDF", "assignments.csv": "تخصیص‌ها CSV", "room_metrics.csv": "شاخص‌های اتاق CSV", "student_metrics.csv": "شاخص‌های دانشجو CSV", "validation_report.csv": "گزارش اعتبارسنجی CSV", "run_metadata.json": "فراداده بازتولیدپذیری" };
-  return <section className="panel"><div className="panel-head"><div><h2>خروجی‌های رسمی</h2><p>هر دریافت در رویدادهای ممیزی ثبت می‌شود.</p></div></div><div className="export-grid">{Object.entries(run.artifacts).map(([name, info]) => <a className="export-card" href={`/api/runs/${run.id}/artifacts/${encodeURIComponent(name)}`} key={name}><span className="export-icon"><Download /></span><div><strong>{labels[name] ?? name}</strong><small>{formatNumber(Math.ceil(info.size / 1024))} کیلوبایت · SHA-256 ثبت‌شده</small></div><ChevronLeft /></a>)}</div></section>;
+  const copy: Record<string, { title: string; description: string }> = {
+    "unimate_report.xlsx": { title: "گزارش کامل تخصیص‌ها", description: "همه اطلاعات تخصیص در چند بخش مرتب" },
+    "unimate_report.pdf": { title: "گزارش آماده چاپ", description: "خلاصه رسمی نتایج برای مشاهده و چاپ" },
+    "assignments.csv": { title: "فهرست تخصیص دانشجویان", description: "نام دانشجو، اتاق و تخت اختصاص‌یافته" },
+    "room_metrics.csv": { title: "گزارش وضعیت اتاق‌ها", description: "ظرفیت، تعداد ساکنان و کیفیت هر اتاق" },
+    "student_metrics.csv": { title: "گزارش وضعیت دانشجویان", description: "امتیاز و نتیجه تخصیص هر دانشجو" },
+    "validation_report.csv": { title: "گزارش بررسی داده‌ها", description: "خطاها و هشدارهای شناسایی‌شده در فایل ورودی" },
+    "run_metadata.json": { title: "اطلاعات این تخصیص", description: "تنظیماتی که برای انجام این تخصیص استفاده شده است" },
+  };
+  return <section className="panel"><div className="panel-head"><div><h2>خروجی‌ها</h2><p>گزارش مورد نیازتان را برای مشاهده، چاپ یا نگهداری دریافت کنید.</p></div></div><div className="export-grid">{Object.entries(run.artifacts).map(([name]) => { const item = copy[name] ?? { title: "گزارش تکمیلی", description: "اطلاعات تکمیلی این تخصیص" }; return <a className="export-card" href={`/api/runs/${run.id}/artifacts/${encodeURIComponent(name)}`} key={name}><span className="export-icon"><Download /></span><div><strong>{item.title}</strong><small>{item.description}</small></div><ChevronLeft /></a>; })}</div></section>;
 }
 
 function RunAuditTab({ runId }: { runId: string }) {
   const result = useQuery({ queryKey: ["audit", runId], queryFn: () => api<Page<any>>(`/audit?entity_id=${encodeURIComponent(runId)}&limit=200`) });
-  return <section className="panel"><div className="panel-head"><div><h2>ردپای ممیزی این اجرا</h2><p>شروع، لغو، تکمیل و دریافت خروجی‌های همین اجرا نمایش داده می‌شود.</p></div></div><div className="audit-list">{result.isLoading ? <Loading /> : (result.data?.items ?? []).map((event) => <div className="audit-row" key={event.id}><span className="audit-dot" /><div><strong>{AUDIT_LABELS[event.action] ?? event.action}</strong><small>{event.details?.artifact ? String(event.details.artifact) : `شناسه ${runId.slice(0, 8)}`}</small></div><time>{formatDate(event.created_at)}</time></div>)}</div></section>;
+  return <section className="panel"><div className="panel-head"><div><h2>تاریخچه این اجرا</h2><p>شروع، لغو، تکمیل و دریافت خروجی‌های همین اجرا نمایش داده می‌شود.</p></div></div><div className="audit-list">{result.isLoading ? <Loading /> : (result.data?.items ?? []).map((event) => <div className="audit-row" key={event.id}><span className="audit-dot" /><div><strong>{AUDIT_LABELS[event.action] ?? event.action}</strong><small>{event.details?.artifact ? String(event.details.artifact) : `شناسه ${runId.slice(0, 8)}`}</small></div><time>{formatDate(event.created_at)}</time></div>)}</div></section>;
 }
 
 function RunWorkspace({ runId }: { runId: string }) {
@@ -330,10 +425,10 @@ function RunWorkspace({ runId }: { runId: string }) {
   if (result.isLoading) return <Loading />;
   if (!result.data) return <EmptyState title="اجرا پیدا نشد" text="ممکن است این اجرا حذف شده باشد." />;
   const run = result.data;
-  const tabs = [{ id: "overview", label: "نمای کلی" }, { id: "rooms", label: "اتاق‌ها" }, { id: "students", label: "دانشجویان" }, { id: "investigate", label: "بررسی زوج" }, { id: "audit", label: "ممیزی" }, { id: "exports", label: "خروجی‌ها" }];
+  const tabs = [{ id: "overview", label: "نمای کلی" }, { id: "rooms", label: "اتاق‌ها" }, { id: "students", label: "دانشجویان" }, { id: "audit", label: "تاریخچه" }, { id: "exports", label: "خروجی‌ها" }];
   return <><div className="page-heading compact"><div><Link className="back-link" to="/"><ArrowLeft /> بازگشت به اجراها</Link><div className="title-line"><h1>{run.dataset_filename}</h1><StatusBadge status={run.status} /></div><p>{formatNumber(run.student_count)} دانشجو · ایجاد در {formatDate(run.created_at)} · شناسه {run.id.slice(0, 8)}</p></div><div className="heading-actions">{["queued", "running"].includes(run.status) && <button className="button secondary" onClick={() => cancel.mutate()}><X /> لغو اجرا</button>}{["draft", "succeeded", "failed", "cancelled"].includes(run.status) && <button className="button danger-outline" onClick={() => window.confirm("این اجرا و داده‌های وابسته به‌طور دائمی حذف شوند؟") && remove.mutate()}><Trash2 /> حذف</button>}</div></div>
     <div className="tabs">{tabs.map((item) => <button className={tab === item.id ? "active" : ""} disabled={!['overview', 'audit'].includes(item.id) && run.status !== "succeeded"} onClick={() => setTab(item.id)} key={item.id}>{item.label}</button>)}</div>
-    {tab === "overview" && <OverviewTab run={run} />}{tab === "rooms" && <RoomsTab runId={runId} />}{tab === "students" && <StudentsTab runId={runId} />}{tab === "investigate" && <InvestigateTab runId={runId} />}{tab === "audit" && <RunAuditTab runId={runId} />}{tab === "exports" && <ExportsTab run={run} />}
+    {tab === "overview" && <OverviewTab run={run} />}{tab === "rooms" && <RoomsTab runId={runId} />}{tab === "students" && <StudentsTab runId={runId} />}{tab === "audit" && <RunAuditTab runId={runId} />}{tab === "exports" && <ExportsTab run={run} />}
   </>;
 }
 
@@ -341,7 +436,7 @@ function RunDetailPage() { const { id } = useParams(); return id ? <RunWorkspace
 
 function AuditPage() {
   const result = useQuery({ queryKey: ["audit"], queryFn: () => api<Page<any>>("/audit?limit=200") });
-  return <><div className="page-heading"><div><p className="eyebrow">ردپای عملیاتی</p><h1>رویدادهای ممیزی</h1><p>فعالیت‌های امنیتی و عملیاتی بدون ثبت اطلاعات شخصی دانشجویان نگهداری می‌شوند.</p></div></div><section className="panel audit-list">{result.isLoading ? <Loading /> : (result.data?.items ?? []).map((event) => <div className="audit-row" key={event.id}><span className="audit-dot" /><div><strong>{AUDIT_LABELS[event.action] ?? event.action}</strong><small>{event.entity_type}{event.entity_id ? ` · ${String(event.entity_id).slice(0, 8)}` : ""}</small></div><time>{formatDate(event.created_at)}</time></div>)}</section></>;
+  return <><div className="page-heading"><div><p className="eyebrow">فعالیت‌های سامانه</p><h1>تاریخچه فعالیت‌ها</h1><p>فعالیت‌های امنیتی و عملیاتی بدون ثبت اطلاعات شخصی دانشجویان نگهداری می‌شوند.</p></div></div><section className="panel audit-list">{result.isLoading ? <Loading /> : (result.data?.items ?? []).map((event) => <div className="audit-row" key={event.id}><span className="audit-dot" /><div><strong>{AUDIT_LABELS[event.action] ?? event.action}</strong><small>{event.entity_type}{event.entity_id ? ` · ${String(event.entity_id).slice(0, 8)}` : ""}</small></div><time>{formatDate(event.created_at)}</time></div>)}</section></>;
 }
 
 function Protected({ children }: { children: ReactNode }) {

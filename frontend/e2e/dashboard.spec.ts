@@ -111,13 +111,40 @@ test("keeps result queries run-scoped and exposes every audited export", async (
   await page.getByPlaceholder("جست‌وجوی شناسه اتاق").fill("B-401");
   await expect.poll(() => page.evaluate(() => performance.getEntriesByType("resource").map((item) => item.name).some((name) => name.includes("/api/runs/run-1/rooms?query=B-401")))).toBeTruthy();
 
-  await page.getByRole("button", { name: "ممیزی" }).click();
-  await expect(page.getByText("ردپای ممیزی این اجرا")).toBeVisible();
+  await page.getByRole("button", { name: "تاریخچه" }).click();
+  await expect(page.getByText("تاریخچه این اجرا")).toBeVisible();
   await page.getByRole("button", { name: "خروجی‌ها" }).click();
   await expect(page.locator(".export-card")).toHaveCount(7);
   const download = page.waitForEvent("download");
-  await page.getByText("تخصیص‌ها CSV").click();
+  await page.getByText("فهرست تخصیص دانشجویان").click();
   await expect((await download).suggestedFilename()).toBe("assignments.csv");
+});
+
+test("drills into room composition and student preferences", async ({ page }) => {
+  const students = [
+    { room_id: "B-401", bed: 1, room_capacity: 3, student_idx: 0, student_id: "S-001", student_name: "مریم احمدی", student_utility: 91.5, room_quality: 88.2, faculty: "فنی", major: "مهندسی کامپیوتر", age: 21, sleep_window: 1, wake_window: 2, noise_tolerance: 0, study_habit: 1, cleanliness: 1 },
+    { room_id: "B-401", bed: 2, room_capacity: 3, student_idx: 1, student_id: "S-002", student_name: "سارا رضایی", student_utility: 86.4, room_quality: 88.2, faculty: "علوم", major: "ریاضی", age: 22, sleep_window: 1, wake_window: 2, noise_tolerance: 0, study_habit: 1, cleanliness: 1 },
+  ];
+  await page.route("**/api/runs/run-1", (route) => route.fulfill({ json: completedRun }));
+  await page.route("**/api/runs/run-1/rooms?**", (route) => route.fulfill({ json: { items: [{ room_id: "B-401", room_size: 2, room_capacity: 3, room_quality: 88.2, mean_student_utility: 89, cleanliness_contribution: 25, noise_contribution: 25, study_contribution: 25, schedule_contribution: 13.2 }], total: 1, offset: 0, limit: 50 } }));
+  await page.route("**/api/runs/run-1/students?**", (route) => route.fulfill({ json: { items: students, total: students.length, offset: 0, limit: 50 } }));
+
+  await page.goto("/runs/run-1");
+  await page.getByRole("button", { name: "اتاق‌ها" }).click();
+  await expect(page.getByText("قوی‌ترین معیار")).toBeVisible();
+  await page.getByRole("button", { name: "جزئیات" }).click();
+  await expect(page.getByRole("dialog", { name: "اتاق B-401" })).toBeVisible();
+  await expect(page.getByText("اجزای کیفیت اتاق")).toBeVisible();
+  await expect(page.getByText("مریم احمدی")).toBeVisible();
+  await page.getByRole("button", { name: "بستن جزئیات" }).click();
+
+  await page.getByRole("button", { name: "دانشجویان" }).click();
+  await expect(page.getByText("خلاصه ترجیحات")).toBeVisible();
+  await page.getByRole("button", { name: "مشاهده" }).first().click();
+  await expect(page.getByRole("dialog", { name: "مریم احمدی" })).toBeVisible();
+  await expect(page.getByText("پروفایل و ترجیحات")).toBeVisible();
+  await expect(page.getByText("مهندسی کامپیوتر", { exact: true })).toBeVisible();
+  await expect(page.getByText("ترکیب هم‌اتاقی‌ها")).toBeVisible();
 });
 
 test("requires confirmation before deleting a completed run", async ({ page }) => {
