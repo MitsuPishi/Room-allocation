@@ -487,9 +487,7 @@ def explain_pair(run_id: str, first_idx: int, second_idx: int, auth=Depends(requ
     return CompatibilityScorer(config).explain_pair(records[first_idx], records[second_idx])
 
 
-@router.get("/runs/{run_id}/artifacts/{filename}")
-def download_artifact(run_id: str, filename: str, auth: tuple[Admin, AdminSession] = Depends(require_session), db: Session = Depends(get_db)):
-    admin, _ = auth
+def _artifact_file(run_id: str, filename: str, db: Session) -> tuple[OptimizationRun, Path]:
     run = db.get(OptimizationRun, run_id)
     if run is None or filename not in run.artifact_manifest:
         raise HTTPException(status_code=404, detail="Artifact not found.")
@@ -497,6 +495,67 @@ def download_artifact(run_id: str, filename: str, auth: tuple[Admin, AdminSessio
     path = resolve_storage_key(storage_key)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Artifact file is unavailable.")
+    return run, path
+
+
+@router.get("/runs/{run_id}/artifacts/{filename}/preview")
+def preview_artifact(
+    run_id: str,
+    filename: str,
+    sheet: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=100, ge=1, le=200),
+    auth: tuple[Admin, AdminSession] = Depends(require_session),
+    db: Session = Depends(get_db),
+):
+    admin, _ = auth
+    _, path = _artifact_file(run_id, filename, db)
+    suffix = path.suffix.lower()
+    record_audit(db, action="artifact_previewed", entity_type="run", entity_id=run_id, admin_id=admin.id, details={"artifact": filename})
+    db.commit()
+
+    if suffix == ".pdf":
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        )
+    if suffix == ".json":
+        return {
+            "kind": "json",
+            "filename": filename,
+            "data": json.loads(path.read_text(encoding="utf-8")),
+        }
+    if suffix == ".csv":
+        frame = pd.read_csv(path)
+        sheets: list[str] = []
+        selected_sheet = None
+    elif suffix == ".xlsx":
+        with pd.ExcelFile(path) as workbook:
+            sheets = list(workbook.sheet_names)
+            selected_sheet = sheet or sheets[0]
+            if selected_sheet not in sheets:
+                raise HTTPException(status_code=404, detail="Workbook sheet not found.")
+            frame = pd.read_excel(workbook, sheet_name=selected_sheet)
+    else:
+        raise HTTPException(status_code=415, detail="This artifact cannot be previewed.")
+
+    rows = json.loads(frame.head(limit).to_json(orient="records", force_ascii=False, date_format="iso"))
+    return {
+        "kind": "table",
+        "filename": filename,
+        "columns": [str(column) for column in frame.columns],
+        "rows": rows,
+        "total_rows": len(frame),
+        "sheets": sheets,
+        "sheet": selected_sheet,
+        "truncated": len(frame) > limit,
+    }
+
+
+@router.get("/runs/{run_id}/artifacts/{filename}")
+def download_artifact(run_id: str, filename: str, auth: tuple[Admin, AdminSession] = Depends(require_session), db: Session = Depends(get_db)):
+    admin, _ = auth
+    _, path = _artifact_file(run_id, filename, db)
     record_audit(db, action="artifact_downloaded", entity_type="run", entity_id=run_id, admin_id=admin.id, details={"artifact": filename})
     db.commit()
     return FileResponse(path, filename=filename)

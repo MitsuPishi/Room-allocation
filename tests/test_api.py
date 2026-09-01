@@ -32,19 +32,33 @@ def clean_state():
 @pytest.fixture()
 def client(monkeypatch):
     def fake_artifacts(run_id, assignments, rooms, students, validation, metadata):
-        del assignments, rooms, students, validation, metadata
-        path = run_artifact_dir(run_id) / "assignments.csv"
-        path.write_text("room_id,student_id\nRoom-0001,a\n", encoding="utf-8")
-        content = path.read_bytes()
+        del assignments, rooms, students, validation
+        output_dir = run_artifact_dir(run_id)
+        csv_path = output_dir / "assignments.csv"
+        csv_path.write_text("room_id,student_id\nRoom-0001,a\n", encoding="utf-8")
+        json_path = output_dir / "run_metadata.json"
+        json_path.write_text(json.dumps(metadata), encoding="utf-8")
+        from openpyxl import Workbook
+
+        workbook = Workbook()
+        workbook.active.title = "خلاصه"
+        workbook.active.append(["room_id", "quality"])
+        workbook.active.append(["Room-0001", 88])
+        xlsx_path = output_dir / "unimate_report.xlsx"
+        workbook.save(xlsx_path)
+        pdf_path = output_dir / "unimate_report.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4\n%%EOF")
         import hashlib
 
-        return {
-            "assignments.csv": {
+        manifest = {}
+        for path in (csv_path, json_path, xlsx_path, pdf_path):
+            content = path.read_bytes()
+            manifest[path.name] = {
                 "storage_key": str(path.relative_to(settings.storage_root)),
                 "sha256": hashlib.sha256(content).hexdigest(),
                 "size": len(content),
             }
-        }
+        return manifest
 
     monkeypatch.setattr(jobs, "generate_run_artifacts", fake_artifacts)
     with TestClient(app) as value:
@@ -141,6 +155,22 @@ def test_full_run_lifecycle_results_download_and_delete(client: TestClient):
     )
     assert pair.status_code == 200
     assert "total" in pair.json()
+    preview = client.get(f"/api/runs/{run_id}/artifacts/assignments.csv/preview")
+    assert preview.status_code == 200
+    assert preview.json()["kind"] == "table"
+    assert preview.json()["columns"] == ["room_id", "student_id"]
+    assert preview.json()["rows"][0]["room_id"] == "Room-0001"
+    workbook_preview = client.get(f"/api/runs/{run_id}/artifacts/unimate_report.xlsx/preview")
+    assert workbook_preview.status_code == 200
+    assert workbook_preview.json()["sheet"] == "خلاصه"
+    assert workbook_preview.json()["rows"][0]["quality"] == 88
+    metadata_preview = client.get(f"/api/runs/{run_id}/artifacts/run_metadata.json/preview")
+    assert metadata_preview.status_code == 200
+    assert metadata_preview.json()["kind"] == "json"
+    pdf_preview = client.get(f"/api/runs/{run_id}/artifacts/unimate_report.pdf/preview")
+    assert pdf_preview.status_code == 200
+    assert pdf_preview.headers["content-type"] == "application/pdf"
+    assert pdf_preview.headers["content-disposition"].startswith("inline")
     download = client.get(f"/api/runs/{run_id}/artifacts/assignments.csv")
     assert download.status_code == 200
     assert download.content.startswith(b"room_id")

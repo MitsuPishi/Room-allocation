@@ -288,7 +288,7 @@ type StudentRow = {
   study_habit?: number | null;
   cleanliness?: number | null;
 };
-const AUDIT_LABELS: Record<string, string> = { login_succeeded: "ورود موفق", login_failed: "ورود ناموفق", logout: "خروج", password_changed: "تغییر رمز", dataset_uploaded: "بارگذاری داده", dataset_validated: "اعتبارسنجی داده", run_created: "ایجاد اجرا", run_queued: "ارسال به صف", run_started: "شروع اجرا", run_completed: "تکمیل اجرا", run_failed: "شکست اجرا", run_cancel_requested: "درخواست لغو", run_cancelled: "لغو اجرا", artifact_downloaded: "دریافت خروجی", run_deleted: "حذف اجرا" };
+const AUDIT_LABELS: Record<string, string> = { login_succeeded: "ورود موفق", login_failed: "ورود ناموفق", logout: "خروج", password_changed: "تغییر رمز", dataset_uploaded: "بارگذاری داده", dataset_validated: "اعتبارسنجی داده", run_created: "ایجاد اجرا", run_queued: "ارسال به صف", run_started: "شروع اجرا", run_completed: "تکمیل اجرا", run_failed: "شکست اجرا", run_cancel_requested: "درخواست لغو", run_cancelled: "لغو اجرا", artifact_previewed: "پیش‌نمایش خروجی", artifact_downloaded: "دریافت خروجی", run_deleted: "حذف اجرا" };
 const CONTRIBUTION_LABELS: Array<[keyof RoomRow, string]> = [
   ["cleanliness_contribution", "نظافت"],
   ["noise_contribution", "تحمل صدا"],
@@ -425,17 +425,94 @@ function StudentsTab({ runId }: { runId: string }) {
   return <><section className="panel"><div className="panel-head"><div><h2>دانشجویان</h2><p>دانشجویان با امتیاز کمتر در ابتدای فهرست هستند؛ نمای کامل، ترجیحات و هم‌اتاقی‌ها را نشان می‌دهد.</p></div><label className="search"><Search /><input placeholder="نام، شناسه یا اتاق" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} /></label></div>{result.isLoading ? <Loading /> : <DataGrid data={result.data?.items ?? []} columns={columns} />}<Pager page={page} limit={limit} total={result.data?.total ?? 0} setPage={setPage} /></section>{selected && <StudentInspector runId={runId} student={selected} onClose={() => setSelected(null)} />}</>;
 }
 
+type ArtifactPreview = {
+  kind: "table" | "json";
+  filename: string;
+  columns?: string[];
+  rows?: Array<Record<string, unknown>>;
+  total_rows?: number;
+  sheets?: string[];
+  sheet?: string | null;
+  truncated?: boolean;
+  data?: unknown;
+};
+
+type ExportDescription = { title: string; description: string; purpose: string };
+
+const EXPORT_COPY: Record<string, ExportDescription> = {
+  "unimate_report.xlsx": { title: "گزارش کامل تخصیص‌ها", description: "همه اطلاعات تخصیص در چند برگه مرتب", purpose: "مناسب بررسی کامل و کار با Excel" },
+  "unimate_report.pdf": { title: "گزارش آماده ارائه", description: "خلاصه رسمی نتایج با چیدمان آماده چاپ", purpose: "مناسب ارائه به مدیریت و چاپ" },
+  "assignments.csv": { title: "فهرست تخصیص دانشجویان", description: "نام دانشجو، اتاق و تخت اختصاص‌یافته", purpose: "مناسب تحویل به مسئول اسکان" },
+  "room_metrics.csv": { title: "گزارش وضعیت اتاق‌ها", description: "ظرفیت، تعداد ساکنان و کیفیت هر اتاق", purpose: "مناسب بررسی ظرفیت و کیفیت اتاق‌ها" },
+  "student_metrics.csv": { title: "گزارش وضعیت دانشجویان", description: "امتیاز و نتیجه تخصیص هر دانشجو", purpose: "مناسب بررسی عدالت تخصیص" },
+  "validation_report.csv": { title: "گزارش بررسی داده‌ها", description: "خطاها و هشدارهای فایل ورودی", purpose: "مناسب اصلاح پرسشنامه و داده‌ها" },
+  "run_metadata.json": { title: "اطلاعات فنی تخصیص", description: "تنظیمات و مشخصات بازتولید این اجرا", purpose: "مناسب مستندسازی و بازتولید نتیجه" },
+};
+
+function fileSizeLabel(bytes?: number) {
+  if (bytes == null) return "";
+  if (bytes < 1024) return `${formatNumber(bytes)} بایت`;
+  if (bytes < 1024 * 1024) return `${formatNumber(bytes / 1024, 1)} کیلوبایت`;
+  return `${formatNumber(bytes / (1024 * 1024), 1)} مگابایت`;
+}
+
+function previewCell(value: unknown) {
+  if (value == null || value === "") return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function PdfArtifactPreview({ url }: { url: string }) {
+  const [source, setSource] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let objectUrl = "";
+    const controller = new AbortController();
+    fetch(url, { credentials: "include", signal: controller.signal })
+      .then((response) => { if (!response.ok) throw new Error("پیش‌نمایش PDF در دسترس نیست."); return response.blob(); })
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setSource(objectUrl); })
+      .catch((reason: Error) => { if (reason.name !== "AbortError") setError(reason.message); });
+    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [url]);
+  if (error) return <div className="alert danger">{error}</div>;
+  if (!source) return <Loading label="آماده‌سازی پیش‌نمایش PDF" />;
+  return <iframe className="pdf-preview" src={source} title="پیش‌نمایش گزارش PDF" />;
+}
+
+function ArtifactPreviewDialog({ runId, name, description, onClose }: { runId: string; name: string; description: ExportDescription; onClose: () => void }) {
+  const isPdf = name.toLowerCase().endsWith(".pdf");
+  const [sheet, setSheet] = useState("");
+  const [query, setQuery] = useState("");
+  const previewPath = `/runs/${runId}/artifacts/${encodeURIComponent(name)}/preview${sheet ? `?sheet=${encodeURIComponent(sheet)}` : ""}`;
+  const preview = useQuery({ queryKey: ["artifact-preview", runId, name, sheet], queryFn: () => api<ArtifactPreview>(previewPath), enabled: !isPdf });
+  const rows = preview.data?.rows ?? [];
+  const normalizedQuery = query.trim().toLocaleLowerCase("fa");
+  const visibleRows = normalizedQuery ? rows.filter((row) => Object.values(row).some((value) => previewCell(value).toLocaleLowerCase("fa").includes(normalizedQuery))) : rows;
+  const downloadUrl = `/api/runs/${runId}/artifacts/${encodeURIComponent(name)}`;
+  const pdfUrl = `/api/runs/${runId}/artifacts/${encodeURIComponent(name)}/preview`;
+  return <InspectorFrame title={description.title} subtitle={description.purpose} onClose={onClose} wide>
+    <div className="preview-actions"><div><span className="file-type">{name.split(".").pop()?.toUpperCase()}</span><small>{name}</small></div><a className="button primary small" href={downloadUrl}><Download /> دانلود فایل</a></div>
+    {isPdf ? <PdfArtifactPreview url={pdfUrl} /> : preview.isLoading ? <Loading label="دریافت محتوای گزارش" /> : preview.isError ? <div className="alert danger">{(preview.error as Error).message}</div> : preview.data?.kind === "json" ? <pre className="json-preview">{JSON.stringify(preview.data.data, null, 2)}</pre> : <>
+      <div className="preview-toolbar">
+        {(preview.data?.sheets?.length ?? 0) > 1 && <label><span>برگه Excel</span><select value={preview.data?.sheet ?? ""} onChange={(event) => { setSheet(event.target.value); setQuery(""); }}>{preview.data?.sheets?.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>}
+        <label className="search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="جست‌وجو در ردیف‌های پیش‌نمایش" /></label>
+        <small>{formatNumber(visibleRows.length)} ردیف نمایش داده شده از {formatNumber(preview.data?.total_rows ?? 0)}</small>
+      </div>
+      <div className="artifact-preview-table"><table><thead><tr>{preview.data?.columns?.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{visibleRows.map((row, index) => <tr key={index}>{preview.data?.columns?.map((column) => <td key={column}>{previewCell(row[column])}</td>)}</tr>)}</tbody></table>{!visibleRows.length && <div className="inline-empty">ردیفی مطابق جست‌وجوی شما پیدا نشد.</div>}</div>
+      {preview.data?.truncated && <p className="preview-note">برای حفظ سرعت، فقط {formatNumber(rows.length)} ردیف نخست پیش‌نمایش داده می‌شود؛ فایل دانلودی شامل همه ردیف‌هاست.</p>}
+    </>}
+  </InspectorFrame>;
+}
+
 function ExportsTab({ run }: { run: Run }) {
-  const copy: Record<string, { title: string; description: string }> = {
-    "unimate_report.xlsx": { title: "گزارش کامل تخصیص‌ها", description: "همه اطلاعات تخصیص در چند بخش مرتب" },
-    "unimate_report.pdf": { title: "گزارش آماده چاپ", description: "خلاصه رسمی نتایج برای مشاهده و چاپ" },
-    "assignments.csv": { title: "فهرست تخصیص دانشجویان", description: "نام دانشجو، اتاق و تخت اختصاص‌یافته" },
-    "room_metrics.csv": { title: "گزارش وضعیت اتاق‌ها", description: "ظرفیت، تعداد ساکنان و کیفیت هر اتاق" },
-    "student_metrics.csv": { title: "گزارش وضعیت دانشجویان", description: "امتیاز و نتیجه تخصیص هر دانشجو" },
-    "validation_report.csv": { title: "گزارش بررسی داده‌ها", description: "خطاها و هشدارهای شناسایی‌شده در فایل ورودی" },
-    "run_metadata.json": { title: "اطلاعات این تخصیص", description: "تنظیماتی که برای انجام این تخصیص استفاده شده است" },
-  };
-  return <section className="panel"><div className="panel-head"><div><h2>خروجی‌ها</h2><p>گزارش مورد نیازتان را برای مشاهده، چاپ یا نگهداری دریافت کنید.</p></div></div><div className="export-grid">{Object.entries(run.artifacts).map(([name]) => { const item = copy[name] ?? { title: "گزارش تکمیلی", description: "اطلاعات تکمیلی این تخصیص" }; return <a className="export-card" href={`/api/runs/${run.id}/artifacts/${encodeURIComponent(name)}`} key={name}><span className="export-icon"><Download /></span><div><strong>{item.title}</strong><small>{item.description}</small></div><ChevronLeft /></a>; })}</div></section>;
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+  const entries = Object.entries(run.artifacts).filter(([name]) => {
+    const item = EXPORT_COPY[name] ?? { title: "گزارش تکمیلی", description: "اطلاعات تکمیلی این تخصیص", purpose: "مناسب بررسی تکمیلی" };
+    const haystack = `${name} ${item.title} ${item.description} ${item.purpose}`.toLocaleLowerCase("fa");
+    return haystack.includes(query.trim().toLocaleLowerCase("fa"));
+  });
+  return <><section className="panel"><div className="panel-head export-heading"><div><h2>مرور خروجی‌ها</h2><p>ابتدا محتوای هر گزارش را ببینید و بعد فایل مناسب را دریافت کنید.</p></div><label className="search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="جست‌وجوی گزارش یا کاربرد آن" /></label></div><div className="report-finder"><strong>راهنمای انتخاب سریع</strong><span>ارائه رسمی: PDF</span><span>بررسی کامل: Excel</span><span>تحلیل جزئی: CSV</span><span>بازتولید: JSON</span></div><div className="export-grid">{entries.map(([name, manifest]) => { const item = EXPORT_COPY[name] ?? { title: "گزارش تکمیلی", description: "اطلاعات تکمیلی این تخصیص", purpose: "مناسب بررسی تکمیلی" }; const extension = name.split(".").pop()?.toUpperCase(); return <article className="export-card" key={name}><span className="export-icon"><FileCheck2 /></span><div className="export-copy"><span className="export-meta"><b>{extension}</b>{fileSizeLabel(manifest.size)}</span><strong>{item.title}</strong><small>{item.description}</small><em>{item.purpose}</em></div><div className="export-actions"><button className="button secondary small" onClick={() => setSelected(name)}><Eye /> پیش‌نمایش</button><a className="button ghost small" href={`/api/runs/${run.id}/artifacts/${encodeURIComponent(name)}`}><Download /> دانلود</a></div></article>; })}{!entries.length && <div className="inline-empty export-empty">گزارشی مطابق جست‌وجوی شما پیدا نشد.</div>}</div></section>{selected && <ArtifactPreviewDialog key={selected} runId={run.id} name={selected} description={EXPORT_COPY[selected] ?? { title: "گزارش تکمیلی", description: "اطلاعات تکمیلی این تخصیص", purpose: "مناسب بررسی تکمیلی" }} onClose={() => setSelected(null)} />}</>;
 }
 
 function RunAuditTab({ runId }: { runId: string }) {
