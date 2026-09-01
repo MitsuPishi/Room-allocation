@@ -78,8 +78,6 @@ function LoginPage() {
     <section className="login-intro">
       <div className="brand-mark"><BedDouble size={30} /></div>
       <p className="eyebrow">سامانه رسمی امور خوابگاه</p>
-      <h1>تخصیص منصفانه،<br />تصمیم‌گیری قابل دفاع.</h1>
-      <p>یونی‌میت داده‌های پرسشنامه را اعتبارسنجی می‌کند، تخصیص را با معیارهای شفاف انجام می‌دهد و تمام مراحل را در تاریخچه نگه می‌دارد.</p>
       <div className="trust-row"><span><ShieldCheck /> داده‌ها در دانشگاه می‌مانند</span><span><BookOpenCheck /> امتیازها توضیح‌پذیرند</span></div>
     </section>
     <section className="login-panel">
