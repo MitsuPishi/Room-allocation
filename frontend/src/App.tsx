@@ -328,7 +328,40 @@ function RoomContributions({ room }: { room: RoomRow }) {
   return <div className="contribution-block"><div className="contribution-bar" aria-label="ترکیب امتیاز معیارهای اتاق">{values.map((item, index) => <span key={item.label} style={{ width: `${Math.max(0, item.value)}%`, background: palette[index] }} />)}</div><div className="contribution-legend">{values.map((item, index) => <div key={item.label}><i style={{ background: palette[index] }} /><span>{item.label}</span><strong>{formatNumber(item.value, 1)}</strong></div>)}</div></div>;
 }
 
-function InspectorFrame({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: ReactNode }) {
+const RESIDENT_CRITERIA = [
+  { key: "cleanliness", label: "نظافت", value: (student: StudentRow) => preferenceLabel("cleanliness", student.cleanliness) },
+  { key: "noise_tolerance", label: "تحمل صدا", value: (student: StudentRow) => preferenceLabel("noise_tolerance", student.noise_tolerance) },
+  { key: "study_habit", label: "عادت مطالعه", value: (student: StudentRow) => preferenceLabel("study_habit", student.study_habit) },
+  { key: "sleep_window", label: "زمان خواب", value: (student: StudentRow) => scheduleLabel(student.sleep_window, SLEEP_LABELS) },
+  { key: "wake_window", label: "زمان بیداری", value: (student: StudentRow) => scheduleLabel(student.wake_window, WAKE_LABELS) },
+] as const;
+
+function ResidentComparison({ students }: { students: StudentRow[] }) {
+  return <div className="resident-comparison">
+    <div className="comparison-summary" aria-label="خلاصه مقایسه معیارهای ساکنان">
+      {RESIDENT_CRITERIA.map((criterion) => {
+        const values = new Set(students.map(criterion.value).filter((value) => value !== "ثبت نشده"));
+        const isSame = values.size === 1 && students.length > 1;
+        return <div key={criterion.key} className={isSame ? "same" : "varied"}>
+          <span>{criterion.label}</span>
+          <strong>{isSame ? "یکسان" : values.size > 1 ? `${formatNumber(values.size)} الگوی متفاوت` : "نیازمند داده"}</strong>
+        </div>;
+      })}
+    </div>
+    <div className="comparison-table-wrap">
+      <table className="comparison-table">
+        <thead><tr><th>ساکن</th>{RESIDENT_CRITERIA.map((criterion) => <th key={criterion.key}>{criterion.label}</th>)}<th>امتیاز فردی</th></tr></thead>
+        <tbody>{students.map((student) => <tr key={student.student_idx}>
+          <th scope="row"><span className="resident-identity"><span className="bed-number">{formatNumber(student.bed)}</span><span><strong>{student.student_name}</strong><small>{student.student_id}</small></span></span></th>
+          {RESIDENT_CRITERIA.map((criterion) => <td key={criterion.key}><span className="comparison-value">{criterion.value(student)}</span></td>)}
+          <td><strong className="comparison-score">{formatNumber(student.student_utility, 1)}</strong></td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function InspectorFrame({ title, subtitle, onClose, children, wide = false }: { title: string; subtitle: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     const closeOnEscape = (event: KeyboardEvent) => event.key === "Escape" && onClose();
@@ -336,15 +369,16 @@ function InspectorFrame({ title, subtitle, onClose, children }: { title: string;
     window.addEventListener("keydown", closeOnEscape);
     return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
   }, [onClose]);
-  return <div className="inspector-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><aside className="inspector" role="dialog" aria-modal="true" aria-label={title}><header><div><p className="eyebrow">نمای بازرسی</p><h2>{title}</h2><span>{subtitle}</span></div><button className="icon-button" aria-label="بستن جزئیات" onClick={onClose}><X /></button></header><div className="inspector-body">{children}</div></aside></div>;
+  return <div className="inspector-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className={`inspector${wide ? " inspector-wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}><header><div><p className="eyebrow">نمای بازرسی</p><h2>{title}</h2><span>{subtitle}</span></div><button className="icon-button" aria-label="بستن جزئیات" onClick={onClose}><X /></button></header><div className="inspector-body">{children}</div></section></div>;
 }
 
 function RoomInspector({ runId, room, onClose }: { runId: string; room: RoomRow; onClose: () => void }) {
   const residents = useQuery({ queryKey: ["room-residents", runId, room.room_id], queryFn: () => api<Page<StudentRow>>(`/runs/${runId}/students?room_id=${encodeURIComponent(room.room_id)}&offset=0&limit=500`) });
-  return <InspectorFrame title={`اتاق ${room.room_id}`} subtitle={`${formatNumber(room.room_size)} ساکن از ظرفیت ${formatNumber(room.room_capacity)} نفر`} onClose={onClose}>
+  const students = residents.data?.items ?? [];
+  return <InspectorFrame title={`اتاق ${room.room_id}`} subtitle={`${formatNumber(room.room_size)} ساکن از ظرفیت ${formatNumber(room.room_capacity)} نفر`} onClose={onClose} wide>
     <div className="inspector-metrics"><div><span>کیفیت اتاق</span><strong>{formatNumber(room.room_quality, 1)}</strong></div><div><span>میانگین امتیاز ساکنان</span><strong>{formatNumber(room.mean_student_utility, 1)}</strong></div><div><span>تخت خالی</span><strong>{formatNumber(room.room_capacity - room.room_size)}</strong></div></div>
     <section className="inspector-section"><div className="inspector-section-title"><h3>اجزای کیفیت اتاق</h3><small>سهم هر معیار از امتیاز نهایی ۱۰۰</small></div><RoomContributions room={room} /></section>
-    <section className="inspector-section"><div className="inspector-section-title"><h3>ساکنان اتاق</h3><small>{formatNumber(residents.data?.total ?? room.room_size)} دانشجو</small></div>{residents.isLoading ? <Loading label="دریافت فهرست ساکنان" /> : <div className="resident-list">{(residents.data?.items ?? []).map((student) => <article key={student.student_idx}><span className="bed-number">{formatNumber(student.bed)}</span><div><strong>{student.student_name}</strong><small>{student.student_id}</small><ProfileChips student={student} compact /></div><span className="resident-score"><small>امتیاز فردی</small><strong>{formatNumber(student.student_utility, 1)}</strong></span></article>)}</div>}</section>
+    <section className="inspector-section"><div className="inspector-section-title"><div><h3>مقایسه ساکنان اتاق</h3><p>معیارهای مؤثر در تخصیص هر دانشجو را در یک ردیف مقایسه کنید.</p></div><small>{formatNumber(residents.data?.total ?? room.room_size)} دانشجو</small></div>{residents.isLoading ? <Loading label="دریافت فهرست ساکنان" /> : students.length ? <ResidentComparison students={students} /> : <div className="inline-empty">اطلاعات ساکنان این اتاق در دسترس نیست.</div>}</section>
   </InspectorFrame>;
 }
 
